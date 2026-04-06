@@ -46,11 +46,12 @@ impl IpcConn {
         if self.read_buf.len() < 4 {
             return Ok(None);
         }
-        let len = u32::from_le_bytes(
-            self.read_buf[..4]
-                .try_into()
-                .expect("slice is exactly 4 bytes"),
-        ) as usize;
+        let len = u32::from_le_bytes([
+            self.read_buf[0],
+            self.read_buf[1],
+            self.read_buf[2],
+            self.read_buf[3],
+        ]) as usize;
         if len > MAX_MSG_SIZE {
             self.read_buf.clear();
             return Err(io::Error::new(

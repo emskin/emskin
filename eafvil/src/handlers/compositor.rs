@@ -24,7 +24,11 @@ impl CompositorHandler for EafvilState {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
-        &client.get_data::<ClientState>().unwrap().compositor_state
+        // All clients are inserted via insert_client with Arc<ClientState>.
+        &client
+            .get_data::<ClientState>()
+            .expect("ClientState missing — client was not inserted via our listener")
+            .compositor_state
     }
 
     fn commit(&mut self, surface: &WlSurface) {
@@ -40,6 +44,21 @@ impl CompositorHandler for EafvilState {
                 .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == &root))
             {
                 window.on_commit();
+            }
+
+            // Pending → committed geometry transition for EAF app windows.
+            // When an EAF app commits a new buffer after a configure, atomically
+            // switch its geometry so the new buffer and new position appear together.
+            let commit_info = self.apps.get_mut_by_surface(&root).and_then(|app| {
+                app.pending_geometry.take().map(|pending| {
+                    app.geometry = Some(pending);
+                    app.pending_since = None;
+                    (app.window.clone(), app.window_id, pending)
+                })
+            });
+            if let Some((window, window_id, geo)) = commit_info {
+                self.space.map_element(window, geo.loc, false);
+                tracing::debug!("EAF app window_id={window_id} geometry committed: {geo:?}");
             }
         };
 

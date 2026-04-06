@@ -8,10 +8,7 @@ mod state;
 mod winit;
 
 use clap::Parser;
-use smithay::reexports::{
-    calloop::{generic::Generic, Interest, Mode, PostAction},
-    wayland_server::Display,
-};
+use smithay::reexports::wayland_server::Display;
 pub use state::EafvilState;
 
 /// Nested Wayland compositor for Emacs Application Framework.
@@ -59,30 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => tracing::info!("Could not read host keymap, using default"),
     }
 
-    // Register IPC listener fd with calloop (accept new connections).
-    {
-        use std::os::unix::io::FromRawFd;
-        let listener_fd = state.ipc.listener_fd();
-        // SAFETY: We duplicate the fd so the Generic source owns its own copy.
-        // The original fd remains valid inside IpcServer for the lifetime of state.
-        let dup_fd = unsafe { libc::dup(listener_fd) };
-        if dup_fd < 0 {
-            return Err("dup(ipc listener fd) failed".into());
-        }
-        // SAFETY: dup_fd is a valid open fd (dup succeeded above, dup_fd >= 0).
-        // Ownership transfers to File; the original listener_fd stays open in IpcServer.
-        let file = unsafe { std::fs::File::from_raw_fd(dup_fd) };
-        event_loop
-            .handle()
-            .insert_source(
-                Generic::new(file, Interest::READ, Mode::Level),
-                |_, _, state| {
-                    state.ipc.accept();
-                    Ok(PostAction::Continue)
-                },
-            )
-            .map_err(|e| format!("failed to register IPC listener: {e}"))?;
-    }
+    register_ipc_source(&mut event_loop, &state)?;
 
     // Open a Wayland/X11 window for our nested compositor
     crate::winit::init_winit(&mut event_loop, &mut state)?;
@@ -112,6 +86,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 handle_ipc_message(state, msg);
             }
         }
+
+        // Force-commit pending geometries that have timed out (100ms).
+        for (window_id, window, geo) in state
+            .apps
+            .collect_timed_out(std::time::Duration::from_millis(100))
+        {
+            state.space.map_element(window, geo.loc, false);
+            tracing::debug!("EAF app window_id={window_id} geometry force-committed (timeout)");
+        }
     })?;
 
     // Clean up Emacs child process
@@ -123,20 +106,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn register_ipc_source(
+    event_loop: &mut smithay::reexports::calloop::EventLoop<EafvilState>,
+    state: &EafvilState,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use smithay::reexports::calloop::{generic::Generic, Interest, Mode, PostAction};
+    use std::os::unix::io::FromRawFd;
+    let listener_fd = state.ipc.listener_fd();
+    // SAFETY: We duplicate the fd so the Generic source owns its own copy.
+    // The original fd remains valid inside IpcServer for the lifetime of state.
+    let dup_fd = unsafe { libc::dup(listener_fd) };
+    if dup_fd < 0 {
+        return Err("dup(ipc listener fd) failed".into());
+    }
+    // SAFETY: dup_fd is a valid open fd (dup succeeded above, dup_fd >= 0).
+    // Ownership transfers to File; the original listener_fd stays open in IpcServer.
+    let file = unsafe { std::fs::File::from_raw_fd(dup_fd) };
+    event_loop
+        .handle()
+        .insert_source(
+            Generic::new(file, Interest::READ, Mode::Level),
+            |_, _, state| {
+                state.ipc.accept();
+                Ok(PostAction::Continue)
+            },
+        )
+        .map_err(|e| format!("failed to register IPC listener: {e}"))?;
+    Ok(())
+}
+
 fn spawn_emacs(cli: &Cli, state: &mut EafvilState) {
     if cli.no_spawn {
         tracing::info!("--no-spawn: waiting for external Emacs connection");
         return;
     }
 
-    let socket_name = state.socket_name.to_str().unwrap_or("").to_string();
+    let Some(socket_name) = state.socket_name.to_str() else {
+        tracing::error!("Wayland socket name is not valid UTF-8, cannot spawn Emacs");
+        return;
+    };
     tracing::info!(
         "Spawning Emacs: {} (WAYLAND_DISPLAY={})",
         cli.emacs_command,
         socket_name
     );
     match std::process::Command::new(&cli.emacs_command)
-        .env("WAYLAND_DISPLAY", &socket_name)
+        .env("WAYLAND_DISPLAY", socket_name)
         .spawn()
     {
         Ok(child) => state.emacs_child = Some(child),
@@ -184,19 +199,33 @@ fn handle_ipc_message(state: &mut EafvilState, msg: ipc::IncomingMessage) {
 
 fn ipc_set_geometry(state: &mut EafvilState, window_id: u64, x: i32, y: i32, w: i32, h: i32) {
     tracing::debug!("IPC set_geometry window={window_id} ({x},{y},{w},{h})");
-    let maybe_window = state.apps.get_mut(window_id).map(|app| {
-        app.geometry = Some(smithay::utils::Rectangle::new((x, y).into(), (w, h).into()));
-        app.visible = true;
-        if let Some(toplevel) = app.window.toplevel() {
-            toplevel.with_pending_state(|s| {
-                s.size = Some((w, h).into());
-            });
-            toplevel.send_pending_configure();
-        }
-        app.window.clone()
-    });
-    if let Some(window) = maybe_window {
+    if w <= 0 || h <= 0 {
+        tracing::warn!("IPC set_geometry: invalid size ({w}x{h}), ignoring");
+        return;
+    }
+    let new_geo = smithay::utils::Rectangle::new((x, y).into(), (w, h).into());
+    let Some(app) = state.apps.get_mut(window_id) else {
+        return;
+    };
+    app.visible = true;
+
+    // Configure the surface to the new size.
+    if let Some(toplevel) = app.window.toplevel() {
+        toplevel.with_pending_state(|s| {
+            s.size = Some((w, h).into());
+        });
+        toplevel.send_pending_configure();
+    }
+
+    if app.geometry.is_none() {
+        // First set_geometry — commit immediately (no previous state to tear against).
+        app.geometry = Some(new_geo);
+        let window = app.window.clone();
         state.space.map_element(window, (x, y), false);
+    } else {
+        // Subsequent — write pending, wait for client buffer commit.
+        app.pending_geometry = Some(new_geo);
+        app.pending_since = Some(std::time::Instant::now());
     }
 }
 

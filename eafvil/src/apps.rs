@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
 use smithay::{
     desktop::Window,
@@ -10,8 +13,12 @@ use smithay::{
 pub struct AppWindow {
     pub window_id: u64,
     pub window: Window,
-    /// Geometry (logical px) assigned by Emacs via `set_geometry`. None = pending.
+    /// Committed geometry (logical px) — currently used for rendering.
     pub geometry: Option<Rectangle<i32, Logical>>,
+    /// Pending geometry awaiting the client's next buffer commit.
+    pub pending_geometry: Option<Rectangle<i32, Logical>>,
+    /// When `pending_geometry` was set (for timeout-based force-commit).
+    pub pending_since: Option<Instant>,
     pub visible: bool,
 }
 
@@ -50,6 +57,33 @@ impl AppManager {
             .values()
             .find(|w| w.window.toplevel().is_some_and(|t| t.wl_surface() == wl))
             .map(|w| w.window_id)
+    }
+
+    /// Find a mutable reference to the AppWindow for a given Wayland surface.
+    pub fn get_mut_by_surface(&mut self, wl: &WlSurface) -> Option<&mut AppWindow> {
+        self.windows
+            .values_mut()
+            .find(|w| w.window.toplevel().is_some_and(|t| t.wl_surface() == wl))
+    }
+
+    /// Collect EAF app windows whose pending geometry has timed out.
+    /// Returns (window_id, window, geo) for each; caller must `map_element`.
+    pub fn collect_timed_out(
+        &mut self,
+        timeout: Duration,
+    ) -> Vec<(u64, Window, Rectangle<i32, Logical>)> {
+        let mut result = Vec::new();
+        for app in self.windows.values_mut() {
+            if let (Some(since), Some(pending)) = (app.pending_since, app.pending_geometry) {
+                if since.elapsed() > timeout {
+                    app.geometry = Some(pending);
+                    app.pending_geometry = None;
+                    app.pending_since = None;
+                    result.push((app.window_id, app.window.clone(), pending));
+                }
+            }
+        }
+        result
     }
 
     /// Remove and return all windows whose Wayland surface has been destroyed.

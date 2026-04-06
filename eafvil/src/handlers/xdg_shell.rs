@@ -69,6 +69,8 @@ impl XdgShellHandler for EafvilState {
                 window_id,
                 window,
                 geometry: None,
+                pending_geometry: None,
+                pending_since: None,
                 visible: false,
             });
 

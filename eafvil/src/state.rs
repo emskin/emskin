@@ -105,7 +105,7 @@ impl EafvilState {
 
         let space = Space::default();
 
-        let socket_name = Self::init_wayland_listener(display, event_loop);
+        let socket_name = Self::init_wayland_listener(display, event_loop)?;
 
         let loop_signal = event_loop.get_signal();
 
@@ -146,9 +146,8 @@ impl EafvilState {
     fn init_wayland_listener(
         display: Display<EafvilState>,
         event_loop: &mut EventLoop<Self>,
-    ) -> OsString {
-        let listening_socket =
-            ListeningSocketSource::new_auto().expect("failed to create Wayland listening socket");
+    ) -> Result<OsString, Box<dyn std::error::Error>> {
+        let listening_socket = ListeningSocketSource::new_auto()?;
         let socket_name = listening_socket.socket_name().to_os_string();
 
         let loop_handle = event_loop.handle();
@@ -162,7 +161,7 @@ impl EafvilState {
                     tracing::error!("Failed to insert Wayland client: {}", e);
                 }
             })
-            .expect("Failed to init the wayland event source.");
+            .map_err(|e| format!("failed to init wayland event source: {e}"))?;
 
         loop_handle
             .insert_source(
@@ -180,9 +179,9 @@ impl EafvilState {
                     Ok(PostAction::Continue)
                 },
             )
-            .expect("failed to init the display event source");
+            .map_err(|e| format!("failed to init display event source: {e}"))?;
 
-        socket_name
+        Ok(socket_name)
     }
 
     pub fn surface_under(
