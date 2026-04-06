@@ -108,6 +108,7 @@ pub fn init_winit(
     let (mut backend, winit) = winit::init()?;
 
     backend.window().set_title("Emacs");
+    backend.window().set_maximized(true);
 
     let mode = make_mode(backend.window_size());
 

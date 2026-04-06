@@ -3,6 +3,7 @@
 mod grabs;
 mod handlers;
 mod input;
+mod keymap;
 mod state;
 mod winit;
 
@@ -19,12 +20,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut state = EafvilState::new(&mut event_loop, display);
 
+    // Inherit the host compositor's keyboard layout
+    match keymap::read_host_keymap() {
+        Some(host_keymap) => {
+            tracing::info!("Loaded host keyboard keymap ({} bytes)", host_keymap.len());
+            if let Err(e) = state
+                .seat
+                .get_keyboard()
+                .unwrap()
+                .set_keymap_from_string(&mut state, host_keymap)
+            {
+                tracing::warn!("Failed to apply host keymap: {e:?}, using default");
+            }
+        }
+        None => tracing::info!("Could not read host keymap, using default"),
+    }
+
     // Open a Wayland/X11 window for our nested compositor
     crate::winit::init_winit(&mut event_loop, &mut state)?;
 
     spawn_emacs(&mut state);
 
-    event_loop.run(None, &mut state, move |_| {})?;
+    event_loop.run(None, &mut state, |state| {
+        if let Some(ref mut child) = state.emacs_child {
+            if let Ok(Some(status)) = child.try_wait() {
+                tracing::info!("Emacs exited with {status}, stopping compositor");
+                state.loop_signal.stop();
+            }
+        }
+    })?;
 
     // Clean up Emacs child process
     if let Some(mut child) = state.emacs_child.take() {

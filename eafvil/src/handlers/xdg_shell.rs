@@ -42,6 +42,7 @@ impl XdgShellHandler for EafvilState {
                 let logical = mode.size.to_f64().to_logical(scale).to_i32_round();
                 surface.with_pending_state(|state| {
                     state.size = Some(logical);
+                    state.states.set(xdg_toplevel::State::Fullscreen);
                 });
             }
         }
@@ -99,12 +100,8 @@ impl XdgShellHandler for EafvilState {
         }
     }
 
-    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
-        if self.is_emacs_surface(&surface) {
-            tracing::info!("Emacs requested exit fullscreen");
-            self.pending_fullscreen = Some(false);
-            Self::set_toplevel_state(&surface, xdg_toplevel::State::Fullscreen, false);
-        }
+    fn unfullscreen_request(&mut self, _surface: ToplevelSurface) {
+        // Emacs always fills the compositor window — ignore unfullscreen
     }
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
@@ -115,12 +112,8 @@ impl XdgShellHandler for EafvilState {
         }
     }
 
-    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
-        if self.is_emacs_surface(&surface) {
-            tracing::info!("Emacs requested unmaximize");
-            self.pending_maximize = Some(false);
-            Self::set_toplevel_state(&surface, xdg_toplevel::State::Maximized, false);
-        }
+    fn unmaximize_request(&mut self, _surface: ToplevelSurface) {
+        // Emacs always fills the compositor window — ignore unmaximize
     }
 
     fn title_changed(&mut self, surface: ToplevelSurface) {
@@ -148,6 +141,36 @@ impl XdgShellHandler for EafvilState {
 
 // Xdg Shell
 delegate_xdg_shell!(EafvilState);
+
+// Xdg Decoration — always force server-side (no decorations drawn = borderless)
+use smithay::delegate_xdg_decoration;
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
+use smithay::wayland::shell::xdg::decoration::XdgDecorationHandler;
+
+impl XdgDecorationHandler for EafvilState {
+    fn new_decoration(&mut self, toplevel: ToplevelSurface) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(Mode::ServerSide);
+        });
+        toplevel.send_configure();
+    }
+
+    fn request_mode(&mut self, toplevel: ToplevelSurface, _mode: Mode) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(Mode::ServerSide);
+        });
+        toplevel.send_pending_configure();
+    }
+
+    fn unset_mode(&mut self, toplevel: ToplevelSurface) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(Mode::ServerSide);
+        });
+        toplevel.send_pending_configure();
+    }
+}
+
+delegate_xdg_decoration!(EafvilState);
 
 pub fn handle_surface_commit(
     popups: &mut PopupManager,

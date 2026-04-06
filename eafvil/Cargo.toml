@@ -8,6 +8,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 bitflags = "2.2.1"
 winit_crate = { package = "winit", version = "0.30", default-features = false }
+wayland-client = "0.31"
 
 [dependencies.smithay]
 git = "https://github.com/Smithay/smithay.git"
