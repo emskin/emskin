@@ -29,6 +29,8 @@ pub struct EafvilState {
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
 
+    pub ipc: crate::ipc::IpcServer,
+
     pub space: Space<Window>,
     pub loop_signal: LoopSignal,
 
@@ -73,7 +75,11 @@ pub struct EafvilState {
 }
 
 impl EafvilState {
-    pub fn new(event_loop: &mut EventLoop<Self>, display: Display<Self>) -> Self {
+    pub fn new(
+        event_loop: &mut EventLoop<Self>,
+        display: Display<Self>,
+        ipc: crate::ipc::IpcServer,
+    ) -> Self {
         let start_time = std::time::Instant::now();
         let dh = display.handle();
 
@@ -105,6 +111,8 @@ impl EafvilState {
         Self {
             start_time,
             display_handle: dh,
+
+            ipc,
 
             space,
             loop_signal,
