@@ -7,7 +7,7 @@ use smithay::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::protocol::{wl_output::WlOutput, wl_seat, wl_surface::WlSurface},
     },
-    utils::Serial,
+    utils::{Serial, SERIAL_COUNTER},
     wayland::{
         compositor::with_states,
         shell::xdg::{
@@ -48,6 +48,12 @@ impl XdgShellHandler for EafvilState {
 
             let window = Window::new_wayland_window(surface);
             self.space.map_element(window, (0, 0), false);
+
+            // Give Emacs initial keyboard focus.
+            let serial = SERIAL_COUNTER.next_serial();
+            if let Some(keyboard) = self.seat.get_keyboard() {
+                keyboard.set_focus(self, self.emacs_surface.clone(), serial);
+            }
         } else {
             // Subsequent toplevels = EAF app windows.
             let window_id = self.apps.alloc_id();
