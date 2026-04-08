@@ -7,8 +7,9 @@
 ## Architecture
 - Nested Wayland compositor using smithay, hosting Emacs inside a winit window
 - First toplevel = Emacs (fullscreen), subsequent toplevels = EAF app windows managed by AppManager
-- IPC protocol: length-prefixed JSON over Unix socket. Emacs→compositor: set_geometry, close, set_visibility, forward_key. Compositor→Emacs: connected, surface_size, window_created, window_destroyed, title_changed
+- IPC protocol: length-prefixed JSON over Unix socket. Emacs→compositor: set_geometry, close, set_visibility, forward_key, add_mirror, update_mirror_geometry, remove_mirror, promote_mirror. Compositor→Emacs: connected, surface_size, window_created, window_destroyed, title_changed
 - Elisp client: `mvp/elisp/eaf-eafvil.el` — auto-connects via parent PID socket discovery, syncs geometry on `window-size-change-functions` with change-detection guard
+- Mirror system: same EAF app displays in multiple Emacs windows. Source = first window (real surface), mirrors = subsequent windows (TextureRenderElement from same GPU texture). Elisp tracks source/mirror in `eaf-eafvil--mirror-table`
 - grabs/ directory is placeholder code for future move/resize support
 
 ## Key Gotchas
@@ -25,6 +26,14 @@
 - `window-pixel-edges` is relative to native frame (excludes external menu-bar/toolbar); `window-body-pixel-edges` bottom = top of mode-line
 - EAF app windows must be mapped to space at 1×1 in `new_toplevel` (otherwise on_commit and initial configure don't fire); actual size arrives via `set_geometry` IPC
 - Host resize must only resize the Emacs surface; EAF app window sizes are controlled by Emacs via IPC
+- Mirror rendering: `TextureRenderElement` position is Physical coords — must use `output.current_scale().fractional_scale()` for logical→physical conversion, NOT hardcode 1.0
+- Mirror rendering: must call `import_surface_tree` BEFORE `with_renderer_surface_state` to get texture — otherwise texture is None on frames where surface just committed
+- Mirror rendering: use stable `Id` (created once in `add_mirror`, stored in `MirrorView`) — `Id::new()` every frame causes damage tracker to flicker
+- Mirror rendering: `TextureRenderElement` needs `buffer_scale`, `buffer_transform`, and viewport `src` from `RendererSurfaceState` — otherwise size is wrong under fractional scaling
+- Mirror input: `surface_under()` must check mirrors BEFORE space — Emacs is fullscreen and `element_under()` always hits it first, blocking mirror detection
+- Mirror input: pointer `under_position` for mirrors needs offset compensation (`pos - mapped_pos`) so smithay computes correct surface-local coords
+- Mirror scaling: aspect-fit with top-left alignment; coordinate mapping in `mirror_under` uses `rel.downscale(ratio)` to map mirror→source; `AppManager::aspect_fit_ratio()` returns None for zero-size to prevent NaN
+- `render_output`'s second type param is the custom_elements type (not space element type); `render_scale` (value 1.0) is actually the `alpha` parameter
 
 ## Wayland Protocols Implemented
 - xdg_shell (toplevel, popup)

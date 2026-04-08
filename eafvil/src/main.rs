@@ -191,6 +191,32 @@ fn handle_ipc_message(state: &mut EafvilState, msg: ipc::IncomingMessage) {
         } => {
             ipc_forward_key(state, window_id, keycode, key_state, modifiers);
         }
+        IncomingMessage::AddMirror {
+            window_id,
+            view_id,
+            x,
+            y,
+            w,
+            h,
+        } => {
+            ipc_add_mirror(state, window_id, view_id, x, y, w, h);
+        }
+        IncomingMessage::UpdateMirrorGeometry {
+            window_id,
+            view_id,
+            x,
+            y,
+            w,
+            h,
+        } => {
+            ipc_update_mirror_geometry(state, window_id, view_id, x, y, w, h);
+        }
+        IncomingMessage::RemoveMirror { window_id, view_id } => {
+            ipc_remove_mirror(state, window_id, view_id);
+        }
+        IncomingMessage::PromoteMirror { window_id, view_id } => {
+            ipc_promote_mirror(state, window_id, view_id);
+        }
     }
 }
 
@@ -305,6 +331,81 @@ fn ipc_forward_key(
     // Restore keyboard focus.
     let restore_serial = smithay::utils::SERIAL_COUNTER.next_serial();
     keyboard.set_focus(state, saved_focus, restore_serial);
+}
+
+fn ipc_add_mirror(
+    state: &mut EafvilState,
+    window_id: u64,
+    view_id: u64,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+) {
+    tracing::debug!("IPC add_mirror window={window_id} view={view_id} ({x},{y},{w},{h})");
+    if w <= 0 || h <= 0 {
+        tracing::warn!("IPC add_mirror: invalid size ({w}x{h}), ignoring");
+        return;
+    }
+    let geo = smithay::utils::Rectangle::new((x, y).into(), (w, h).into());
+    let Some(app) = state.apps.get_mut(window_id) else {
+        tracing::warn!("add_mirror: unknown window_id={window_id}");
+        return;
+    };
+    app.mirrors.insert(
+        view_id,
+        crate::apps::MirrorView {
+            geometry: geo,
+            render_id: smithay::backend::renderer::element::Id::new(),
+        },
+    );
+}
+
+fn ipc_update_mirror_geometry(
+    state: &mut EafvilState,
+    window_id: u64,
+    view_id: u64,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+) {
+    tracing::debug!(
+        "IPC update_mirror_geometry window={window_id} view={view_id} ({x},{y},{w},{h})"
+    );
+    if w <= 0 || h <= 0 {
+        tracing::warn!("IPC update_mirror_geometry: invalid size ({w}x{h}), ignoring");
+        return;
+    }
+    let geo = smithay::utils::Rectangle::new((x, y).into(), (w, h).into());
+    let Some(app) = state.apps.get_mut(window_id) else {
+        return;
+    };
+    if let Some(mv) = app.mirrors.get_mut(&view_id) {
+        mv.geometry = geo;
+    }
+}
+
+fn ipc_remove_mirror(state: &mut EafvilState, window_id: u64, view_id: u64) {
+    tracing::debug!("IPC remove_mirror window={window_id} view={view_id}");
+    if let Some(app) = state.apps.get_mut(window_id) {
+        app.mirrors.remove(&view_id);
+    }
+}
+
+fn ipc_promote_mirror(state: &mut EafvilState, window_id: u64, view_id: u64) {
+    tracing::debug!("IPC promote_mirror window={window_id} view={view_id}");
+    let Some(app) = state.apps.get_mut(window_id) else {
+        return;
+    };
+    // The promoted mirror becomes the source — its geometry becomes
+    // the app's source geometry. Surface is NOT resized (resize only
+    // happens when the user manually adjusts the window size).
+    if let Some(mv) = app.mirrors.remove(&view_id) {
+        app.geometry = Some(mv.geometry);
+        let window = app.window.clone();
+        state.space.map_element(window, mv.geometry.loc, false);
+    }
 }
 
 fn init_logging() {

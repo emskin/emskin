@@ -1,6 +1,7 @@
 ;;; eaf-eafvil.el --- Emacs IPC client for the eafvil Wayland compositor  -*- lexical-binding: t; -*-
 
 (require 'json)
+(require 'cl-lib)
 
 ;; ---------------------------------------------------------------------------
 ;; Customization
@@ -38,6 +39,15 @@ Computed once from compositor-reported surface height.")
 
 (defvar eaf-eafvil--displayed-table (make-hash-table :test 'eql)
   "Reusable hash-table for `eaf-eafvil--sync-all' to avoid per-call allocation.")
+
+;; Mirror tracking: window-id → (source-emacs-window . mirror-alist)
+;; mirror-alist: ((emacs-window-id . view-id) ...)
+(defvar eaf-eafvil--mirror-table (make-hash-table :test 'eql)
+  "Tracks source and mirror windows per EAF app.
+Key: window-id.  Value: (SOURCE-WIN . ((VIEW-ID . EMACS-WIN) ...)).")
+
+(defvar eaf-eafvil--next-view-id 0
+  "Counter for generating unique mirror view IDs.")
 
 ;; ---------------------------------------------------------------------------
 ;; Socket discovery
@@ -368,36 +378,98 @@ Covers the full window width (including fringes) but excludes the mode-line."
                       (w . ,(nth 2 geo))
                       (h . ,(nth 3 geo)))))))
 
+(defun eaf-eafvil--alloc-view-id ()
+  "Allocate a unique mirror view ID."
+  (cl-incf eaf-eafvil--next-view-id))
+
+(defun eaf-eafvil--send-mirror-geometry (wid view-id win msg-type)
+  "Send mirror geometry IPC for WID/VIEW-ID at Emacs WIN position."
+  (let ((geo (eaf-eafvil--window-geometry win)))
+    (eaf-eafvil--send `((type . ,msg-type)
+                        (window_id . ,wid)
+                        (view_id . ,view-id)
+                        (x . ,(nth 0 geo))
+                        (y . ,(nth 1 geo))
+                        (w . ,(nth 2 geo))
+                        (h . ,(nth 3 geo))))))
+
 (defun eaf-eafvil--sync-all (_frame)
-  "Sync visibility and geometry for all EAF buffers across all frames."
-  (let ((displayed eaf-eafvil--displayed-table))
-    (clrhash displayed)
-    ;; Pass 1: collect currently displayed EAF window-ids.
-    ;; When the same EAF buffer is shown in multiple windows (e.g. C-x 3),
-    ;; prefer selected-window so the app surface follows the active window.
+  "Sync visibility, geometry, and mirrors for all EAF buffers."
+  ;; Pass 1: collect all Emacs windows showing each EAF buffer.
+  ;; Key: window-id, Value: list of Emacs windows (in order found).
+  (let ((wid-wins (make-hash-table :test 'eql)))
     (dolist (fr (frame-list))
       (dolist (win (window-list fr 'no-minibuf))
         (when-let ((wid (buffer-local-value 'eaf-eafvil--window-id
                                             (window-buffer win))))
-          (when (or (not (gethash wid displayed))
-                    (eq win (selected-window)))
-            (puthash wid win displayed)))))
-    ;; Pass 2: update visibility and geometry for every EAF buffer.
+          (puthash wid (append (gethash wid wid-wins) (list win)) wid-wins))))
+    ;; Pass 2: for each EAF buffer, sync source + mirrors.
     (dolist (buf (buffer-list))
       (when-let ((wid (buffer-local-value 'eaf-eafvil--window-id buf)))
-        (let* ((win (gethash wid displayed))
-               (now-visible (and win t))
-               (was-visible (buffer-local-value 'eaf-eafvil--visible buf)))
-          ;; Send set_visibility only when state changed.
+        (let* ((wins (gethash wid wid-wins))
+               (now-visible (and wins t))
+               (was-visible (buffer-local-value 'eaf-eafvil--visible buf))
+               (prev-state (gethash wid eaf-eafvil--mirror-table))
+               (prev-source (car prev-state))
+               (prev-mirrors (cdr prev-state))) ; ((view-id . emacs-win) ...)
+          ;; Visibility change.
           (unless (eq now-visible was-visible)
             (with-current-buffer buf
               (setq-local eaf-eafvil--visible now-visible))
             (eaf-eafvil--send `((type . "set_visibility")
                                 (window_id . ,wid)
                                 (visible . ,(if now-visible t :false)))))
-          ;; Sync geometry for visible windows.
-          (when win
-            (eaf-eafvil--report-geometry wid win)))))))
+          (if (not wins)
+              ;; No windows showing this buffer — clean up mirrors.
+              (progn
+                (dolist (m prev-mirrors)
+                  (eaf-eafvil--send `((type . "remove_mirror")
+                                      (window_id . ,wid)
+                                      (view_id . ,(car m)))))
+                (remhash wid eaf-eafvil--mirror-table))
+            ;; Determine source window: keep prev-source if still showing,
+            ;; otherwise use first window in the list.
+            (let* ((source-win (if (and prev-source (memq prev-source wins))
+                                   prev-source
+                                 (car wins)))
+                   (mirror-wins (remq source-win wins))
+                   (new-mirrors nil))
+              ;; Source changed — remove all old mirrors and rebuild.
+              (when (and prev-source (not (eq source-win prev-source)))
+                (dolist (m prev-mirrors)
+                  (eaf-eafvil--send `((type . "remove_mirror")
+                                      (window_id . ,wid)
+                                      (view_id . ,(car m)))))
+                (setq prev-mirrors nil))
+              ;; Sync source geometry.
+              (eaf-eafvil--report-geometry wid source-win)
+              ;; Reconcile mirrors: reuse existing view-ids where possible.
+              (let ((old-by-win (make-hash-table :test 'eq)))
+                ;; Index old mirrors by Emacs window.
+                (dolist (m prev-mirrors)
+                  (puthash (cdr m) (car m) old-by-win))
+                ;; For each mirror window, reuse or create view-id.
+                (dolist (mw mirror-wins)
+                  (let ((vid (or (gethash mw old-by-win)
+                                 (eaf-eafvil--alloc-view-id))))
+                    (push (cons vid mw) new-mirrors)
+                    (if (gethash mw old-by-win)
+                        ;; Existing mirror — update geometry.
+                        (eaf-eafvil--send-mirror-geometry
+                         wid vid mw "update_mirror_geometry")
+                      ;; New mirror — add it.
+                      (eaf-eafvil--send-mirror-geometry
+                       wid vid mw "add_mirror"))
+                    (remhash mw old-by-win)))
+                ;; Remove mirrors that are no longer displayed.
+                (maphash (lambda (_win vid)
+                           (eaf-eafvil--send `((type . "remove_mirror")
+                                               (window_id . ,wid)
+                                               (view_id . ,vid))))
+                         old-by-win))
+              ;; Store current state.
+              (puthash wid (cons source-win (nreverse new-mirrors))
+                       eaf-eafvil--mirror-table))))))))
 
 (add-hook 'window-size-change-functions #'eaf-eafvil--sync-all)
 (add-hook 'window-buffer-change-functions #'eaf-eafvil--sync-all)

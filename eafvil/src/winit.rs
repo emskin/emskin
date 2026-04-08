@@ -3,8 +3,11 @@ use std::time::Duration;
 use smithay::{
     backend::{
         renderer::{
-            damage::OutputDamageTracker, element::surface::WaylandSurfaceRenderElement,
-            gles::GlesRenderer,
+            damage::OutputDamageTracker,
+            element::texture::TextureRenderElement,
+            gles::{GlesRenderer, GlesTexture},
+            utils::with_renderer_surface_state,
+            Renderer,
         },
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
@@ -44,6 +47,77 @@ fn apply_pending_state(state: &mut EafvilState, backend: &mut WinitGraphicsBacke
     }
 }
 
+/// Build TextureRenderElements for all mirrors by reading the surface's
+/// committed texture directly — no copy, no snapshot.
+fn build_mirror_elements(
+    state: &EafvilState,
+    renderer: &mut GlesRenderer,
+    scale: f64,
+) -> Vec<TextureRenderElement<GlesTexture>> {
+    let ctx = renderer.context_id();
+    let mut elements = Vec::new();
+    for app in state.apps.windows() {
+        if app.mirrors.is_empty() {
+            continue;
+        }
+        let Some(toplevel) = app.window.toplevel() else {
+            continue;
+        };
+        let wl_surface = toplevel.wl_surface().clone();
+        // Ensure the surface buffer is imported as a texture before reading it.
+        if let Err(e) =
+            smithay::backend::renderer::utils::import_surface_tree(renderer, &wl_surface)
+        {
+            tracing::warn!(
+                "import_surface_tree failed for wid={}: {e:?}",
+                app.window_id
+            );
+            continue;
+        }
+        let ctx_clone = ctx.clone();
+        let Some((texture, buf_scale, buf_transform, view_src)) =
+            with_renderer_surface_state(&wl_surface, |rss| {
+                let tex = rss.texture::<GlesTexture>(ctx_clone).cloned()?;
+                let src = rss.view().map(|v| v.src);
+                Some((tex, rss.buffer_scale(), rss.buffer_transform(), src))
+            })
+            .flatten()
+        else {
+            continue;
+        };
+        let Some(source_geo) = app.geometry else {
+            continue;
+        };
+        let src_size = source_geo.size.to_f64();
+
+        for mv in app.mirrors.values() {
+            let m = mv.geometry;
+            let Some(ratio) = crate::apps::AppManager::aspect_fit_ratio(src_size, m.size.to_f64())
+            else {
+                continue;
+            };
+            let fit_w = (src_size.w * ratio).round() as i32;
+            let fit_h = (src_size.h * ratio).round() as i32;
+
+            let element = TextureRenderElement::from_static_texture(
+                mv.render_id.clone(),
+                ctx.clone(),
+                m.loc.to_f64().to_physical(scale),
+                texture.clone(),
+                buf_scale,
+                buf_transform,
+                None, // alpha
+                view_src,
+                Some((fit_w, fit_h).into()),
+                None, // opaque_regions
+                smithay::backend::renderer::element::Kind::Unspecified,
+            );
+            elements.push(element);
+        }
+    }
+    elements
+}
+
 fn render_frame(
     state: &EafvilState,
     backend: &mut WinitGraphicsBackend<GlesRenderer>,
@@ -64,23 +138,25 @@ fn render_frame(
             return;
         };
 
+        // Build mirror elements by referencing the surface's committed texture
+        // directly — zero copy, always up-to-date.
+        let scale = output.current_scale().fractional_scale();
+        let mirror_elements = build_mirror_elements(state, renderer, scale);
+
         let render_scale = 1.0;
-        if let Err(e) = smithay::desktop::space::render_output::<
-            _,
-            WaylandSurfaceRenderElement<GlesRenderer>,
-            _,
-            _,
-        >(
-            output,
-            renderer,
-            &mut framebuffer,
-            render_scale,
-            0,
-            [&state.space],
-            &[],
-            damage_tracker,
-            [1.0, 1.0, 1.0, 1.0],
-        ) {
+        if let Err(e) =
+            smithay::desktop::space::render_output::<_, TextureRenderElement<GlesTexture>, _, _>(
+                output,
+                renderer,
+                &mut framebuffer,
+                render_scale,
+                0,
+                [&state.space],
+                &mirror_elements,
+                damage_tracker,
+                [1.0, 1.0, 1.0, 1.0],
+            )
+        {
             tracing::error!("render_output failed: {e}");
             return;
         }

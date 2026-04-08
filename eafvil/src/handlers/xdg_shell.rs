@@ -78,6 +78,7 @@ impl XdgShellHandler for EafvilState {
                 pending_geometry: None,
                 pending_since: None,
                 visible: false,
+                mirrors: std::collections::HashMap::new(),
             });
 
             self.ipc

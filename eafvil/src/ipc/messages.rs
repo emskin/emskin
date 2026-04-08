@@ -24,6 +24,31 @@ pub enum IncomingMessage {
         state: u32,
         modifiers: u32,
     },
+    AddMirror {
+        window_id: u64,
+        view_id: u64,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+    },
+    UpdateMirrorGeometry {
+        window_id: u64,
+        view_id: u64,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+    },
+    RemoveMirror {
+        window_id: u64,
+        view_id: u64,
+    },
+    /// Source was deleted; promote this mirror to become the new source.
+    PromoteMirror {
+        window_id: u64,
+        view_id: u64,
+    },
 }
 
 /// eafvil → Emacs

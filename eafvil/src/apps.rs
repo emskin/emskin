@@ -20,6 +20,15 @@ pub struct AppWindow {
     /// When `pending_geometry` was set (for timeout-based force-commit).
     pub pending_since: Option<Instant>,
     pub visible: bool,
+    /// Mirror views: view_id → (geometry, stable render element ID).
+    /// Each mirror displays a scaled copy of the source surface.
+    pub mirrors: HashMap<u64, MirrorView>,
+}
+
+/// A mirror view of an EAF app window.
+pub struct MirrorView {
+    pub geometry: Rectangle<i32, Logical>,
+    pub render_id: smithay::backend::renderer::element::Id,
 }
 
 /// Tracks all live EAF application windows.
@@ -88,6 +97,51 @@ impl AppManager {
             }
         }
         result
+    }
+
+    /// Compute the aspect-fit scale ratio for rendering `src_size` inside `dst_size`.
+    /// Returns `None` if either dimension is zero.
+    pub fn aspect_fit_ratio(
+        src: smithay::utils::Size<f64, Logical>,
+        dst: smithay::utils::Size<f64, Logical>,
+    ) -> Option<f64> {
+        if src.w <= 0.0 || src.h <= 0.0 || dst.w <= 0.0 || dst.h <= 0.0 {
+            return None;
+        }
+        Some((dst.w / src.w).min(dst.h / src.h))
+    }
+
+    /// Check if `pos` falls inside any mirror of any app window.
+    /// Returns (window_id, mapped surface coordinate) with proportional mapping.
+    pub fn mirror_under(
+        &self,
+        pos: smithay::utils::Point<f64, Logical>,
+    ) -> Option<(u64, smithay::utils::Point<f64, Logical>)> {
+        for app in self.windows.values() {
+            let Some(source_geo) = app.geometry else {
+                continue;
+            };
+            let src_size = source_geo.size.to_f64();
+
+            for mv in app.mirrors.values() {
+                let m = mv.geometry.to_f64();
+                let Some(ratio) = Self::aspect_fit_ratio(src_size, m.size) else {
+                    continue;
+                };
+                let fit: smithay::utils::Size<f64, Logical> =
+                    (src_size.w * ratio, src_size.h * ratio).into();
+                let rel = pos - m.loc;
+
+                // Only respond within the rendered content area (top-left aligned).
+                if rel.x < 0.0 || rel.y < 0.0 || rel.x >= fit.w || rel.y >= fit.h {
+                    continue;
+                }
+
+                let mapped = source_geo.loc.to_f64() + rel.downscale(ratio);
+                return Some((app.window_id, mapped));
+            }
+        }
+        None
     }
 
     /// Remove and return all windows whose Wayland surface has been destroyed.

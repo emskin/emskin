@@ -188,6 +188,38 @@ impl EafvilState {
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        // 1. Check mirror regions first — they overlay Emacs visually.
+        if let Some((window_id, mapped_pos)) = self.apps.mirror_under(pos) {
+            if let Some(app) = self.apps.get(window_id) {
+                if let Some(geo) = self.space.element_geometry(&app.window) {
+                    let local = mapped_pos - geo.loc.to_f64();
+                    let result =
+                        app.window
+                            .surface_under(local, WindowSurfaceType::ALL)
+                            .map(|(s, p)| {
+                                let surface_global = (p + geo.loc).to_f64();
+                                let offset = pos - mapped_pos;
+                                (s, surface_global + offset)
+                            });
+                    tracing::debug!(
+                        "mirror surface_under: pos=({:.0},{:.0}) mapped=({:.0},{:.0}) \
+                         local=({:.0},{:.0}) geo=({},{}) hit={}",
+                        pos.x,
+                        pos.y,
+                        mapped_pos.x,
+                        mapped_pos.y,
+                        local.x,
+                        local.y,
+                        geo.loc.x,
+                        geo.loc.y,
+                        result.is_some(),
+                    );
+                    return result;
+                }
+            }
+        }
+
+        // 2. Check real surfaces in the space.
         self.space
             .element_under(pos)
             .and_then(|(window, location)| {
