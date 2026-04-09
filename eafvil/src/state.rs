@@ -84,6 +84,7 @@ impl EafvilState {
         event_loop: &mut EventLoop<Self>,
         display: Display<Self>,
         ipc: crate::ipc::IpcServer,
+        xkb_config: smithay::input::keyboard::XkbConfig<'_>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let start_time = std::time::Instant::now();
         let dh = display.handle();
@@ -104,7 +105,7 @@ impl EafvilState {
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "winit");
 
-        seat.add_keyboard(Default::default(), 200, 25)
+        seat.add_keyboard(xkb_config, 200, 25)
             .map_err(|e| format!("failed to initialize keyboard: {e:?}"))?;
         seat.add_pointer();
 

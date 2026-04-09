@@ -4,7 +4,6 @@ mod grabs;
 mod handlers;
 mod input;
 pub mod ipc;
-mod keymap;
 mod state;
 mod winit;
 
@@ -27,6 +26,22 @@ struct Cli {
     /// Explicit IPC socket path (default: $XDG_RUNTIME_DIR/eafvil-<pid>.ipc).
     #[arg(long)]
     ipc_path: Option<std::path::PathBuf>,
+
+    /// XKB keyboard layout (e.g. "us", "de", "cn").
+    #[arg(long, default_value = "")]
+    xkb_layout: String,
+
+    /// XKB keyboard model (e.g. "pc105").
+    #[arg(long, default_value = "")]
+    xkb_model: String,
+
+    /// XKB layout variant (e.g. "nodeadkeys").
+    #[arg(long, default_value = "")]
+    xkb_variant: String,
+
+    /// XKB options (e.g. "ctrl:nocaps").
+    #[arg(long)]
+    xkb_options: Option<String>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -41,21 +56,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ipc_path = cli.ipc_path.clone().unwrap_or_else(default_ipc_path);
     tracing::info!("IPC socket path: {}", ipc_path.display());
 
-    let ipc = crate::ipc::IpcServer::bind(ipc_path)?;
-    let mut state = EafvilState::new(&mut event_loop, display, ipc)?;
+    // xkbcommon treats "" as invalid (not "use default"), so when variant is
+    // set but layout is empty we must supply a base layout explicitly.
+    let xkb_layout = if cli.xkb_layout.is_empty() && !cli.xkb_variant.is_empty() {
+        "us".to_string()
+    } else {
+        cli.xkb_layout.clone()
+    };
+    let xkb_config = smithay::input::keyboard::XkbConfig {
+        layout: &xkb_layout,
+        model: &cli.xkb_model,
+        variant: &cli.xkb_variant,
+        options: cli.xkb_options.clone(),
+        ..Default::default()
+    };
 
-    // Inherit the host compositor's keyboard layout
-    match keymap::read_host_keymap() {
-        Some(host_keymap) => {
-            tracing::info!("Loaded host keyboard keymap ({} bytes)", host_keymap.len());
-            if let Some(kb) = state.seat.get_keyboard() {
-                if let Err(e) = kb.set_keymap_from_string(&mut state, host_keymap) {
-                    tracing::warn!("Failed to apply host keymap: {e:?}, using default");
-                }
-            }
-        }
-        None => tracing::info!("Could not read host keymap, using default"),
-    }
+    let ipc = crate::ipc::IpcServer::bind(ipc_path)?;
+    let mut state = EafvilState::new(&mut event_loop, display, ipc, xkb_config)?;
 
     // Initialize clipboard synchronization with host compositor
     state.clipboard = clipboard::ClipboardProxy::new();
