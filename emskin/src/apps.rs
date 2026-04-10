@@ -26,10 +26,15 @@ pub struct AppWindow {
     pub mirrors: HashMap<u64, Rectangle<i32, Logical>>,
 }
 
-/// A renderable surface layer — toplevel or popup — with its offset relative to the toplevel origin.
+/// A renderable surface layer — toplevel or popup.
 pub struct SurfaceLayer {
     pub surface: WlSurface,
-    pub offset: Point<i32, Logical>,
+    /// Where to render this layer's buffer origin, relative to the toplevel.
+    /// Matches smithay's `Space::render_location()`: popup position minus the
+    /// `xdg_surface.set_window_geometry` offset. The subtraction cancels GTK
+    /// CSD shadow padding baked into the buffer so the visible window lands
+    /// at the intended top-left.
+    pub render_offset: Point<i32, Logical>,
 }
 
 impl AppWindow {
@@ -46,14 +51,16 @@ impl AppWindow {
     pub fn surface_layers(&self) -> Vec<SurfaceLayer> {
         if let Some(toplevel) = self.window.toplevel() {
             let wl = toplevel.wl_surface();
+            let wg = self.window.geometry().loc;
             let mut layers = vec![SurfaceLayer {
                 surface: wl.clone(),
-                offset: (0, 0).into(),
+                render_offset: (-wg.x, -wg.y).into(),
             }];
             for (popup, offset) in PopupManager::popups_for_surface(wl) {
+                let pg = popup.geometry().loc;
                 layers.push(SurfaceLayer {
                     surface: popup.wl_surface().clone(),
-                    offset,
+                    render_offset: (offset.x - pg.x, offset.y - pg.y).into(),
                 });
             }
             layers
@@ -62,7 +69,7 @@ impl AppWindow {
                 .map(|s| {
                     vec![SurfaceLayer {
                         surface: s,
-                        offset: (0, 0).into(),
+                        render_offset: (0, 0).into(),
                     }]
                 })
                 .unwrap_or_default()

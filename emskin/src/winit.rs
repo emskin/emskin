@@ -81,15 +81,17 @@ struct SurfaceSnapshot {
 }
 
 /// Walk a layer's subsurface tree and collect one snapshot per mapped surface
-/// with a texture. Offsets are accumulated in source-logical space, starting
-/// from `layer.offset`, so later per-mirror scaling is just multiplication.
+/// with a texture. Offsets accumulate in source-logical space starting from
+/// `layer.render_offset`, which already matches smithay's
+/// `Space::render_location()` (canceling GTK CSD shadow padding).
 fn collect_layer_surfaces(
     renderer: &mut GlesRenderer,
     layer: &crate::apps::SurfaceLayer,
 ) -> Vec<SurfaceSnapshot> {
     let ctx = renderer.context_id();
     let mut out: Vec<SurfaceSnapshot> = Vec::new();
-    let initial = Point::<f64, Logical>::from((layer.offset.x as f64, layer.offset.y as f64));
+    let initial =
+        Point::<f64, Logical>::from((layer.render_offset.x as f64, layer.render_offset.y as f64));
     with_surface_tree_downward(
         &layer.surface,
         initial,
