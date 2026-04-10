@@ -5,6 +5,7 @@ mod handlers;
 mod input;
 pub mod ipc;
 mod state;
+mod utils;
 mod winit;
 
 use clap::Parser;

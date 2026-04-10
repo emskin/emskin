@@ -9,7 +9,7 @@ use smithay::{
     },
 };
 
-use crate::EafvilState;
+use crate::{utils::SizeExt, EafvilState};
 
 impl XwmHandler for EafvilState {
     fn xwm_state(&mut self, _xwm: XwmId) -> &mut X11Wm {
@@ -26,7 +26,8 @@ impl XwmHandler for EafvilState {
 
         let window_id = self.apps.alloc_id();
         let title = window.title();
-        let geo = window.geometry();
+        let mut geo = window.geometry();
+        geo.size = geo.size.at_least((1, 1));
 
         tracing::info!("X11 window mapped: window_id={window_id} title={title:?}");
 
@@ -89,6 +90,7 @@ impl XwmHandler for EafvilState {
         if let Some(h) = h {
             geo.size.h = h as i32;
         }
+        geo.size = geo.size.at_least((1, 1));
         if let Err(e) = window.configure(geo) {
             tracing::warn!("X11 configure_request failed: {e}");
         }

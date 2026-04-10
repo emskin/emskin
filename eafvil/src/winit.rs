@@ -139,7 +139,7 @@ fn build_mirror_elements(
                     buf_transform,
                     None, // alpha
                     view_src,
-                    Some((fit_w, fit_h).into()),
+                    Some((fit_w.max(1), fit_h.max(1)).into()),
                     None, // opaque_regions
                     smithay::backend::renderer::element::Kind::Unspecified,
                 );
