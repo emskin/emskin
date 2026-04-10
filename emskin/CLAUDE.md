@@ -57,4 +57,5 @@
 - wl_data_device (DnD)
 - fractional_scale, viewporter
 - text_input_v3 (IME bridge to host — see smithay fork patches)
+- wp_cursor_shape_v1 (cursor shape forwarding to host — Named icons via winit, Surface falls back to default)
 - linux-dmabuf (GPU buffer sharing for hardware-accelerated clients)

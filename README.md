@@ -22,6 +22,7 @@ emskin 是一个嵌套 Wayland 合成器：在一个 winit 窗口内运行独立
 - **中文/日文/韩文输入法** — 纯 Wayland 客户端（Chrome）通过 text_input_v3 桥接宿主 IME；GTK/Qt 客户端（Firefox）通过 fcitx5-gtk 直连，两条路径自动切换互不干扰
 - **主机剪贴板双向同步**（Wayland 与 X11）
 - **GPU 缓冲区共享** — linux-dmabuf 协议支持硬件加速客户端
+- **光标形状跟随** — 嵌入程序的光标形状自动转发到宿主窗口（链接显示手指、文本框显示 I-beam 等），通过 wp_cursor_shape_v1 协议
 - **Popup 支持**（右键菜单、下拉框、补全浮层等）
 - **xdg_activation_v1 焦点转移**（启动新应用时自动获取焦点）
 - **通过 CLI 参数指定键盘布局**（`--xkb-layout` 等）

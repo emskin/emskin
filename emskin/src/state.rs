@@ -3,7 +3,10 @@ use std::{ffi::OsString, sync::Arc};
 use smithay::{
     backend::{renderer::gles::GlesRenderer, winit::WinitGraphicsBackend},
     desktop::{PopupManager, Space, Window, WindowSurfaceType},
-    input::{Seat, SeatState},
+    input::{
+        pointer::CursorImageStatus,
+        Seat, SeatState,
+    },
     reexports::{
         calloop::{
             generic::Generic, EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction,
@@ -17,6 +20,7 @@ use smithay::{
     utils::{Logical, Point},
     wayland::{
         compositor::{CompositorClientState, CompositorState},
+        cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufGlobal, DmabufState},
         fractional_scale::FractionalScaleManagerState,
         output::OutputManagerState,
@@ -66,6 +70,7 @@ pub struct EmskinState {
     pub xdg_decoration_state: XdgDecorationState,
     pub xdg_activation_state: XdgActivationState,
     pub xwayland_shell_state: XWaylandShellState,
+    pub cursor_shape_manager_state: CursorShapeManagerState,
     pub dmabuf_state: DmabufState,
     /// Keep-alive: dropping this removes the linux-dmabuf global from the display.
     pub dmabuf_global: Option<DmabufGlobal>,
@@ -139,6 +144,10 @@ pub struct EmskinState {
     /// Deferred `set_ime_allowed` for the winit window. Set in `focus_changed`
     /// (which cannot access the backend) and applied in `apply_pending_state`.
     pub pending_ime_allowed: Option<bool>,
+
+    /// Deferred cursor image for the winit window. Set in `cursor_image()`
+    /// callback and applied in `apply_pending_state`.
+    pub pending_cursor: Option<CursorImageStatus>,
 }
 
 impl EmskinState {
@@ -163,6 +172,7 @@ impl EmskinState {
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
         let xdg_activation_state = XdgActivationState::new::<Self>(&dh);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
+        let cursor_shape_manager_state = CursorShapeManagerState::new::<Self>(&dh);
         let text_input_manager_state =
             smithay::wayland::text_input::TextInputManagerState::new::<Self>(&dh);
 
@@ -210,6 +220,7 @@ impl EmskinState {
             xdg_decoration_state,
             xdg_activation_state,
             xwayland_shell_state,
+            cursor_shape_manager_state,
             dmabuf_state,
             dmabuf_global: None,
             text_input_manager_state,
@@ -237,6 +248,7 @@ impl EmskinState {
             skeleton_click_absorbed: false,
             text_input_focus: None,
             pending_ime_allowed: None,
+            pending_cursor: None,
         })
     }
 

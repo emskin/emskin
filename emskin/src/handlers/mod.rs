@@ -40,8 +40,17 @@ impl SeatHandler for EmskinState {
     fn cursor_image(
         &mut self,
         _seat: &Seat<Self>,
-        _image: smithay::input::pointer::CursorImageStatus,
+        image: smithay::input::pointer::CursorImageStatus,
     ) {
+        // Normalize Surface → Default: winit can't render client cursor surfaces,
+        // and dropping Surface early avoids holding a WlSurface reference.
+        let image = match image {
+            smithay::input::pointer::CursorImageStatus::Surface(_) => {
+                smithay::input::pointer::CursorImageStatus::default_named()
+            }
+            other => other,
+        };
+        self.pending_cursor = Some(image);
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
@@ -81,6 +90,9 @@ impl SeatHandler for EmskinState {
 
 delegate_seat!(EmskinState);
 smithay::delegate_text_input_manager!(EmskinState);
+
+impl smithay::wayland::tablet_manager::TabletSeatHandler for EmskinState {}
+smithay::delegate_cursor_shape!(EmskinState);
 
 //
 // Wl Data Device

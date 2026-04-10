@@ -15,7 +15,7 @@ use smithay::{
         },
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
-    input::keyboard::FilterResult,
+    input::{keyboard::FilterResult, pointer::CursorImageStatus},
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{calloop::EventLoop, wayland_server::protocol::wl_surface::WlSurface},
     utils::{Logical, Physical, Point, Rectangle, Size, Transform, SERIAL_COUNTER},
@@ -66,6 +66,19 @@ fn apply_pending_state(state: &mut EmskinState, backend: &mut WinitGraphicsBacke
 
     if let Some(allowed) = state.pending_ime_allowed.take() {
         backend.window().set_ime_allowed(allowed);
+    }
+
+    if let Some(cursor) = state.pending_cursor.take() {
+        let window = backend.window();
+        match cursor {
+            CursorImageStatus::Hidden => window.set_cursor_visible(false),
+            CursorImageStatus::Named(icon) => {
+                window.set_cursor_visible(true);
+                window.set_cursor(winit_crate::window::Cursor::Icon(icon));
+            }
+            // Surface is normalized to Named(Default) in cursor_image()
+            CursorImageStatus::Surface(_) => {}
+        }
     }
 }
 
