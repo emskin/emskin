@@ -16,6 +16,7 @@ use smithay::reexports::wayland_server::Display;
 pub use state::EmskinState;
 
 static ELISP_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../elisp");
+static DEMO_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../demo");
 
 /// Nested Wayland compositor for Emacs Application Framework.
 #[derive(Parser, Debug)]
@@ -228,13 +229,17 @@ fn spawn_child(
     let mut full_args: Vec<String> = Vec::new();
 
     if standalone {
-        if let Some(elisp_dir) = extract_embedded_elisp() {
+        if let Some(elisp_dir) = extract_embedded(&ELISP_DIR, "elisp") {
             full_args.push("--directory".to_string());
             full_args.push(elisp_dir.to_string_lossy().into_owned());
             full_args.push("-l".to_string());
             full_args.push("emskin".to_string());
             state.elisp_dir = Some(elisp_dir);
         }
+        // `emskin-demo-dir` defaults to `../demo` relative to the loaded
+        // emskin.el, so demo scripts must sit alongside the extracted
+        // elisp dir: $XDG_RUNTIME_DIR/emskin-<pid>/{elisp,demo}/.
+        extract_embedded(&DEMO_DIR, "demo");
     }
 
     full_args.extend_from_slice(args);
@@ -263,26 +268,27 @@ fn runtime_dir() -> String {
     std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string())
 }
 
-/// Extract embedded elisp files to `$XDG_RUNTIME_DIR/emskin-<pid>/elisp/`.
-fn extract_embedded_elisp() -> Option<std::path::PathBuf> {
-    let dir = std::path::PathBuf::from(format!(
-        "{}/emskin-{}/elisp",
+/// Extract an embedded `include_dir` tree to
+/// `$XDG_RUNTIME_DIR/emskin-<pid>/<subdir>/`.
+fn extract_embedded(src: &Dir<'_>, subdir: &str) -> Option<std::path::PathBuf> {
+    let dest = std::path::PathBuf::from(format!(
+        "{}/emskin-{}/{subdir}",
         runtime_dir(),
-        std::process::id()
+        std::process::id(),
     ));
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        tracing::error!("Failed to create elisp dir {}: {e}", dir.display());
+    if let Err(e) = std::fs::create_dir_all(&dest) {
+        tracing::error!("Failed to create {subdir} dir {}: {e}", dest.display());
         return None;
     }
-    for file in ELISP_DIR.files() {
-        let dest = dir.join(file.path());
-        if let Err(e) = std::fs::write(&dest, file.contents()) {
-            tracing::error!("Failed to write {}: {e}", dest.display());
+    for file in src.files() {
+        let out = dest.join(file.path());
+        if let Err(e) = std::fs::write(&out, file.contents()) {
+            tracing::error!("Failed to write {}: {e}", out.display());
             return None;
         }
     }
-    tracing::info!("Extracted embedded elisp to {}", dir.display());
-    Some(dir)
+    tracing::info!("Extracted embedded {subdir} to {}", dest.display());
+    Some(dest)
 }
 
 fn default_ipc_path() -> std::path::PathBuf {
