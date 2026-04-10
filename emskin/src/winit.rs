@@ -7,18 +7,19 @@ use smithay::{
             damage::OutputDamageTracker,
             element::{
                 memory::MemoryRenderBufferRenderElement, render_elements,
-                solid::SolidColorRenderElement, texture::TextureRenderElement,
+                solid::SolidColorRenderElement, texture::TextureRenderElement, Id, Kind,
             },
             gles::{GlesRenderer, GlesTexture},
-            utils::with_renderer_surface_state,
-            ImportMem, Renderer, Texture,
+            utils::{import_surface_tree, RendererSurfaceStateUserData},
+            ImportMem, Renderer,
         },
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
     input::keyboard::FilterResult,
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
-    reexports::calloop::EventLoop,
-    utils::{Logical, Physical, Rectangle, Size, Transform, SERIAL_COUNTER},
+    reexports::{calloop::EventLoop, wayland_server::protocol::wl_surface::WlSurface},
+    utils::{Logical, Physical, Point, Rectangle, Size, Transform, SERIAL_COUNTER},
+    wayland::compositor::{with_surface_tree_downward, TraversalAction},
 };
 
 use crate::EmskinState;
@@ -64,8 +65,75 @@ fn apply_pending_state(state: &mut EmskinState, backend: &mut WinitGraphicsBacke
     }
 }
 
-/// Build TextureRenderElements for all mirrors by reading each surface layer's
-/// (toplevel + popups) committed texture — no copy, no snapshot.
+/// Snapshot of one mapped surface within a layer's subsurface tree, in
+/// source-logical coords. Collected once per layer so each mirror only has to
+/// scale/translate (cheap), not re-walk the tree (expensive on GTK apps with
+/// many subsurfaces).
+struct SurfaceSnapshot {
+    surface: WlSurface,
+    /// Offset from the toplevel origin (already includes layer.offset for popups).
+    offset: Point<f64, Logical>,
+    view_src: Rectangle<f64, Logical>,
+    view_dst: Size<i32, Logical>,
+    texture: GlesTexture,
+    buffer_scale: i32,
+    buffer_transform: Transform,
+}
+
+/// Walk a layer's subsurface tree and collect one snapshot per mapped surface
+/// with a texture. Offsets are accumulated in source-logical space, starting
+/// from `layer.offset`, so later per-mirror scaling is just multiplication.
+fn collect_layer_surfaces(
+    renderer: &mut GlesRenderer,
+    layer: &crate::apps::SurfaceLayer,
+) -> Vec<SurfaceSnapshot> {
+    let ctx = renderer.context_id();
+    let mut out: Vec<SurfaceSnapshot> = Vec::new();
+    let initial = Point::<f64, Logical>::from((layer.offset.x as f64, layer.offset.y as f64));
+    with_surface_tree_downward(
+        &layer.surface,
+        initial,
+        |_, states, loc| {
+            let mut loc = *loc;
+            if let Some(data) = states.data_map.get::<RendererSurfaceStateUserData>() {
+                if let Some(view) = data.lock().unwrap().view() {
+                    loc.x += view.offset.x as f64;
+                    loc.y += view.offset.y as f64;
+                    return TraversalAction::DoChildren(loc);
+                }
+            }
+            TraversalAction::SkipChildren
+        },
+        |surface, states, loc| {
+            let mut loc = *loc;
+            let Some(data) = states.data_map.get::<RendererSurfaceStateUserData>() else {
+                return;
+            };
+            let data = data.lock().unwrap();
+            let Some(view) = data.view() else { return };
+            loc.x += view.offset.x as f64;
+            loc.y += view.offset.y as f64;
+            let Some(texture) = data.texture::<GlesTexture>(ctx.clone()).cloned() else {
+                return;
+            };
+            out.push(SurfaceSnapshot {
+                surface: surface.clone(),
+                offset: loc,
+                view_src: view.src,
+                view_dst: view.dst,
+                texture,
+                buffer_scale: data.buffer_scale(),
+                buffer_transform: data.buffer_transform(),
+            });
+        },
+        |_, _, _| true,
+    );
+    out
+}
+
+/// Build TextureRenderElements for all mirrors. Handles clients (e.g. GTK /
+/// Firefox) that render via `wl_subsurface` rather than attaching a buffer
+/// directly to the toplevel.
 fn build_mirror_elements(
     state: &mut EmskinState,
     renderer: &mut GlesRenderer,
@@ -73,7 +141,7 @@ fn build_mirror_elements(
 ) -> Vec<CustomElement<GlesRenderer>> {
     let ctx = renderer.context_id();
     let mut elements = Vec::new();
-    for app in state.apps.windows_mut() {
+    for app in state.apps.windows() {
         if app.mirrors.is_empty() {
             continue;
         }
@@ -86,79 +154,56 @@ fn build_mirror_elements(
         // Iterate layers in reverse: popups first (higher z-order in smithay's
         // front-to-back damage tracker), then toplevel last (background).
         for (layer_idx, layer) in layers.iter().enumerate().rev() {
-            if let Err(e) =
-                smithay::backend::renderer::utils::import_surface_tree(renderer, &layer.surface)
-            {
+            if let Err(e) = import_surface_tree(renderer, &layer.surface) {
                 tracing::warn!(
                     "import_surface_tree failed for wid={} layer={layer_idx}: {e:?}",
                     app.window_id
                 );
                 continue;
             }
-            let ctx_clone = ctx.clone();
-            let Some((texture, buf_scale, buf_transform, view_src)) =
-                with_renderer_surface_state(&layer.surface, |rss| {
-                    let tex = rss.texture::<GlesTexture>(ctx_clone).cloned()?;
-                    let src = rss.view().map(|v| v.src);
-                    Some((tex, rss.buffer_scale(), rss.buffer_transform(), src))
-                })
-                .flatten()
-            else {
-                continue;
-            };
 
-            for mv in app.mirrors.values_mut() {
-                let m = mv.geometry;
+            let snapshots = collect_layer_surfaces(renderer, layer);
+            if snapshots.is_empty() {
+                continue;
+            }
+
+            for (&view_id, mirror_geo) in &app.mirrors {
                 let Some(ratio) =
-                    crate::apps::AppManager::aspect_fit_ratio(src_size, m.size.to_f64())
+                    crate::apps::AppManager::aspect_fit_ratio(src_size, mirror_geo.size.to_f64())
                 else {
                     continue;
                 };
 
-                let layer_x = m.loc.x as f64 + layer.offset.x as f64 * ratio;
-                let layer_y = m.loc.y as f64 + layer.offset.y as f64 * ratio;
+                for snap in &snapshots {
+                    let loc = Point::<f64, Logical>::from((
+                        mirror_geo.loc.x as f64 + snap.offset.x * ratio,
+                        mirror_geo.loc.y as f64 + snap.offset.y * ratio,
+                    ));
+                    let fit_w = (snap.view_dst.w as f64 * ratio).round() as i32;
+                    let fit_h = (snap.view_dst.h as f64 * ratio).round() as i32;
 
-                let (fit_w, fit_h) = if layer_idx == 0 {
-                    (
-                        (src_size.w * ratio).round() as i32,
-                        (src_size.h * ratio).round() as i32,
-                    )
-                } else {
-                    let tex_size = texture.size();
-                    (
-                        (tex_size.w as f64 * ratio / buf_scale as f64).round() as i32,
-                        (tex_size.h as f64 * ratio / buf_scale as f64).round() as i32,
-                    )
-                };
+                    // Stable per-(surface, mirror) ID so the damage tracker
+                    // treats the same surface in different mirrors as distinct.
+                    let render_id =
+                        Id::from_wayland_resource(&snap.surface).namespaced(view_id as usize);
 
-                // Stable render ID: toplevel uses mv.render_id, popup layers
-                // use pre-allocated IDs from mv.popup_render_ids (grown on demand).
-                let render_id = if layer_idx == 0 {
-                    mv.render_id.clone()
-                } else {
-                    let popup_idx = layer_idx - 1;
-                    while mv.popup_render_ids.len() <= popup_idx {
-                        mv.popup_render_ids
-                            .push(smithay::backend::renderer::element::Id::new());
-                    }
-                    mv.popup_render_ids[popup_idx].clone()
-                };
-
-                let element = TextureRenderElement::from_static_texture(
-                    render_id,
-                    ctx.clone(),
-                    smithay::utils::Point::<f64, Logical>::from((layer_x, layer_y))
-                        .to_physical(scale),
-                    texture.clone(),
-                    buf_scale,
-                    buf_transform,
-                    None, // alpha
-                    view_src,
-                    Some((fit_w.max(1), fit_h.max(1)).into()),
-                    None, // opaque_regions
-                    smithay::backend::renderer::element::Kind::Unspecified,
-                );
-                elements.push(element.into());
+                    elements.push(
+                        TextureRenderElement::from_static_texture(
+                            render_id,
+                            ctx.clone(),
+                            loc.to_physical(scale),
+                            snap.texture.clone(),
+                            snap.buffer_scale,
+                            snap.buffer_transform,
+                            None,
+                            Some(snap.view_src),
+                            Some((fit_w.max(1), fit_h.max(1)).into()),
+                            None,
+                            Kind::Unspecified,
+                        )
+                        .into(),
+                    );
+                }
             }
         }
     }

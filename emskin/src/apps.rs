@@ -21,18 +21,9 @@ pub struct AppWindow {
     /// When `pending_geometry` was set (for timeout-based force-commit).
     pub pending_since: Option<Instant>,
     pub visible: bool,
-    /// Mirror views: view_id → (geometry, stable render element ID).
-    /// Each mirror displays a scaled copy of the source surface.
-    pub mirrors: HashMap<u64, MirrorView>,
-}
-
-/// A mirror view of an embedded app window.
-pub struct MirrorView {
-    pub geometry: Rectangle<i32, Logical>,
-    pub render_id: smithay::backend::renderer::element::Id,
-    /// Stable render IDs for popup layers (index = popup layer index).
-    /// Grown on demand, never shrunk — avoids per-frame Id::new() allocation.
-    pub popup_render_ids: Vec<smithay::backend::renderer::element::Id>,
+    /// Mirror views: view_id → geometry. Each entry is a scaled copy of the
+    /// source surface, positioned at the given rectangle.
+    pub mirrors: HashMap<u64, Rectangle<i32, Logical>>,
 }
 
 /// A renderable surface layer — toplevel or popup — with its offset relative to the toplevel origin.
@@ -177,8 +168,8 @@ impl AppManager {
             };
             let src_size = source_geo.size.to_f64();
 
-            for (&view_id, mv) in &app.mirrors {
-                let m = mv.geometry.to_f64();
+            for (&view_id, mirror_geo) in &app.mirrors {
+                let m = mirror_geo.to_f64();
                 let Some(ratio) = Self::aspect_fit_ratio(src_size, m.size) else {
                     continue;
                 };

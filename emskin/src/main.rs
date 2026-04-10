@@ -456,14 +456,7 @@ fn ipc_add_mirror(
         tracing::warn!("add_mirror: unknown window_id={window_id}");
         return;
     };
-    app.mirrors.insert(
-        view_id,
-        crate::apps::MirrorView {
-            geometry: geo,
-            render_id: smithay::backend::renderer::element::Id::new(),
-            popup_render_ids: Vec::new(),
-        },
-    );
+    app.mirrors.insert(view_id, geo);
 }
 
 fn ipc_update_mirror_geometry(
@@ -486,8 +479,8 @@ fn ipc_update_mirror_geometry(
     let Some(app) = state.apps.get_mut(window_id) else {
         return;
     };
-    if let Some(mv) = app.mirrors.get_mut(&view_id) {
-        mv.geometry = geo;
+    if let Some(slot) = app.mirrors.get_mut(&view_id) {
+        *slot = geo;
     }
 }
 
@@ -533,10 +526,10 @@ fn ipc_promote_mirror(state: &mut EmskinState, window_id: u64, view_id: u64) {
     // The promoted mirror becomes the source — its geometry becomes
     // the app's source geometry. Surface is NOT resized (resize only
     // happens when the user manually adjusts the window size).
-    if let Some(mv) = app.mirrors.remove(&view_id) {
-        app.geometry = Some(mv.geometry);
+    if let Some(geo) = app.mirrors.remove(&view_id) {
+        app.geometry = Some(geo);
         let window = app.window.clone();
-        state.space.map_element(window, mv.geometry.loc, false);
+        state.space.map_element(window, geo.loc, false);
     }
 }
 

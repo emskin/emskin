@@ -29,8 +29,9 @@
 - embedded app windows must be mapped to space at 1×1 in `new_toplevel` (otherwise on_commit and initial configure don't fire); actual size arrives via `set_geometry` IPC
 - Host resize must only resize the Emacs surface; embedded app window sizes are controlled by Emacs via IPC
 - Mirror rendering: `TextureRenderElement` position is Physical coords — must use `output.current_scale().fractional_scale()` for logical→physical conversion, NOT hardcode 1.0
-- Mirror rendering: must call `import_surface_tree` BEFORE `with_renderer_surface_state` to get texture — otherwise texture is None on frames where surface just committed
-- Mirror rendering: use stable `Id` (created once in `add_mirror`, stored in `MirrorView`) — `Id::new()` every frame causes damage tracker to flicker
+- Mirror rendering must walk the full `wl_subsurface` tree via `with_surface_tree_downward` — GTK/Firefox paint content onto subsurface children, so reading only the root surface yields an empty mirror
+- Mirror rendering: call `import_surface_tree` once per layer, then walk each layer's subsurface tree *once* (not per mirror) and scale the collected snapshots — avoids O(mirrors × tree) traversals in the render hot path
+- Mirror element Id must be `Id::from_wayland_resource(surface).namespaced(view_id as usize)` — same surface in different mirrors needs distinct Ids or the damage tracker collapses them. `render_elements_from_surface_tree` cannot replace the manual walk because its Id is hardcoded to `from_wayland_resource(surface)` with no namespace hook
 - Mirror rendering: `TextureRenderElement` needs `buffer_scale`, `buffer_transform`, and viewport `src` from `RendererSurfaceState` — otherwise size is wrong under fractional scaling
 - Mirror input: `surface_under()` must check mirrors BEFORE space — Emacs is fullscreen and `element_under()` always hits it first, blocking mirror detection
 - Mirror input: pointer `under_position` for mirrors needs offset compensation (`pos - mapped_pos`) so smithay computes correct surface-local coords
