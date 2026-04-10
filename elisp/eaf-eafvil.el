@@ -46,6 +46,9 @@ Computed once from compositor-reported surface height.")
   "Tracks source and mirror windows per EAF app.
 Key: window-id.  Value: (SOURCE-WIN . ((VIEW-ID . EMACS-WIN) ...)).")
 
+(defvar eaf-eafvil--last-focused-wid 'unset
+  "Last window-id sent via set_focus IPC.  Used as change-detection guard.")
+
 (defvar eaf-eafvil--next-view-id 0
   "Counter for generating unique mirror view IDs.")
 
@@ -180,9 +183,10 @@ VIEW-ID 0 means the source window; otherwise look up the mirror alist."
       (setq-local eaf-eafvil--window-id window-id)
       (setq-local mode-name "EAF")
       (setq-local buffer-read-only t)
-      (eaf-eafvil-input-mode 1)
-      (add-hook 'kill-buffer-hook #'eaf-eafvil--kill-buffer-hook nil t))
-    (switch-to-buffer buf)
+      (add-hook 'kill-buffer-hook #'eaf-eafvil--kill-buffer-hook nil t)
+      (add-hook 'post-command-hook #'eaf-eafvil--post-command-prefix-done nil t))
+    (display-buffer buf '((display-buffer-use-some-window)
+                          (inhibit-same-window . t)))
     (when-let ((win (get-buffer-window buf t)))
       (eaf-eafvil--report-geometry window-id win))
     (message "eafvil: EAF app ready (id=%s)" window-id)))
@@ -220,88 +224,15 @@ VIEW-ID 0 means the source window; otherwise look up the mirror alist."
                         (window_id . ,eaf-eafvil--window-id)))))
 
 ;; ---------------------------------------------------------------------------
-;; Key forwarding (Path B): Emacs intercepts keys → forward_key IPC
+;; Prefix key sequence: compositor redirects focus to Emacs for C-x, C-c, M-x.
+;; After the command completes, tell compositor to restore app focus.
 ;; ---------------------------------------------------------------------------
 
-(defconst eaf-eafvil--keycode-table
-  (let ((tbl (make-hash-table :test 'equal)))
-    ;; Numbers: KEY_1=2 .. KEY_0=11 (same physical keys as QWERTY)
-    (puthash ?1 2 tbl) (puthash ?2 3 tbl) (puthash ?3 4 tbl)
-    (puthash ?4 5 tbl) (puthash ?5 6 tbl) (puthash ?6 7 tbl)
-    (puthash ?7 8 tbl) (puthash ?8 9 tbl) (puthash ?9 10 tbl) (puthash ?0 11 tbl)
-    (puthash ?\[ 12 tbl) (puthash ?\] 13 tbl)
-    ;; Dvorak top row: ' , . p y f g c r l / =
-    (puthash ?' 16 tbl) (puthash ?, 17 tbl) (puthash ?. 18 tbl) (puthash ?p 19 tbl)
-    (puthash ?y 20 tbl) (puthash ?f 21 tbl) (puthash ?g 22 tbl) (puthash ?c 23 tbl)
-    (puthash ?r 24 tbl) (puthash ?l 25 tbl) (puthash ?/ 26 tbl) (puthash ?= 27 tbl)
-    ;; Dvorak home row: a o e u i d h t n s -
-    (puthash ?a 30 tbl) (puthash ?o 31 tbl) (puthash ?e 32 tbl) (puthash ?u 33 tbl)
-    (puthash ?i 34 tbl) (puthash ?d 35 tbl) (puthash ?h 36 tbl) (puthash ?t 37 tbl)
-    (puthash ?n 38 tbl) (puthash ?s 39 tbl) (puthash ?- 40 tbl) (puthash ?` 41 tbl)
-    ;; Dvorak bottom row: ; q j k x b m w v z
-    (puthash ?\\ 43 tbl)
-    (puthash ?\; 44 tbl) (puthash ?q 45 tbl) (puthash ?j 46 tbl) (puthash ?k 47 tbl)
-    (puthash ?x 48 tbl) (puthash ?b 49 tbl) (puthash ?m 50 tbl)
-    (puthash ?w 51 tbl) (puthash ?v 52 tbl) (puthash ?z 53 tbl)
-    ;; Space
-    (puthash ?\s 57 tbl)
-    ;; Special keys
-    (puthash 'escape 1 tbl)
-    (puthash 'backspace 14 tbl) (puthash 'tab 15 tbl) (puthash 'return 28 tbl)
-    (puthash 'delete 111 tbl) (puthash 'insert 110 tbl)
-    ;; Function keys
-    (puthash 'f1 59 tbl) (puthash 'f2 60 tbl) (puthash 'f3 61 tbl) (puthash 'f4 62 tbl)
-    (puthash 'f5 63 tbl) (puthash 'f6 64 tbl) (puthash 'f7 65 tbl) (puthash 'f8 66 tbl)
-    (puthash 'f9 67 tbl) (puthash 'f10 68 tbl) (puthash 'f11 87 tbl) (puthash 'f12 88 tbl)
-    ;; Navigation
-    (puthash 'up 103 tbl) (puthash 'left 105 tbl)
-    (puthash 'right 106 tbl) (puthash 'down 108 tbl)
-    (puthash 'home 102 tbl) (puthash 'end 107 tbl)
-    (puthash 'prior 104 tbl) (puthash 'next 109 tbl)
-    tbl)
-  "Map from Emacs event basic-type to Linux evdev keycode.")
-
-(defun eaf-eafvil--event-to-keycode (event)
-  "Convert Emacs EVENT to a Linux evdev keycode, or nil if unknown."
-  (gethash (event-basic-type event) eaf-eafvil--keycode-table))
-
-(defun eaf-eafvil--forward-key-command ()
-  "Forward the current key event to the EAF app in this buffer."
-  (interactive)
-  (when-let ((wid eaf-eafvil--window-id)
-             (event last-input-event)
-             (keycode (eaf-eafvil--event-to-keycode event)))
-    (let* ((mods (event-modifiers event))
-           (mod-mask (logior (if (memq 'control mods) 1 0)
-                             (if (memq 'shift mods) 2 0)
-                             (if (memq 'meta mods) 4 0))))
-      ;; Send press then release (Emacs only sees key-down events).
-      (eaf-eafvil--send `((type . "forward_key") (window_id . ,wid)
-                          (keycode . ,keycode) (state . 1) (modifiers . ,mod-mask)))
-      (eaf-eafvil--send `((type . "forward_key") (window_id . ,wid)
-                          (keycode . ,keycode) (state . 0) (modifiers . ,mod-mask))))))
-
-(defvar eaf-eafvil-input-mode-map
-  (let ((map (make-sparse-keymap)))
-    ;; Printable ASCII (space=32 .. tilde=126)
-    (dotimes (i 95)
-      (define-key map (vector (+ i 32)) #'eaf-eafvil--forward-key-command))
-    ;; Function keys
-    (dolist (key '(f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12))
-      (define-key map (vector key) #'eaf-eafvil--forward-key-command))
-    ;; Navigation & editing
-    (dolist (key '(left right up down home end prior next
-                   backspace delete tab return insert))
-      (define-key map (vector key) #'eaf-eafvil--forward-key-command))
-    map)
-  "Keymap for `eaf-eafvil-input-mode'.
-Forwards non-prefix keys to EAF apps.  Emacs prefix keys (C-x, C-c, M-x, C-g, C-h)
-are NOT bound here so they pass through to normal Emacs keymaps.")
-
-(define-minor-mode eaf-eafvil-input-mode
-  "Minor mode for forwarding keyboard input to EAF app windows."
-  :lighter " EAF-Fwd"
-  :keymap eaf-eafvil-input-mode-map)
+(defun eaf-eafvil--post-command-prefix-done ()
+  "After a command completes in an EAF buffer, signal the compositor.
+The compositor only acts if it previously redirected focus for a prefix key."
+  (when eaf-eafvil--process
+    (eaf-eafvil--send '((type . "prefix_done")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public API
@@ -498,6 +429,20 @@ Covers the full window width (including fringes) but excludes the mode-line."
 
 (add-hook 'window-size-change-functions #'eaf-eafvil--sync-all)
 (add-hook 'window-buffer-change-functions #'eaf-eafvil--sync-all)
+
+(defun eaf-eafvil--sync-focus (&optional _frame)
+  "Tell the compositor which surface should have keyboard focus.
+When the selected window shows an EAF buffer, focus the app;
+otherwise focus Emacs.  Skips IPC when focus hasn't changed."
+  (when eaf-eafvil--process
+    (let ((wid (buffer-local-value 'eaf-eafvil--window-id
+                                   (window-buffer (selected-window)))))
+      (unless (eq wid eaf-eafvil--last-focused-wid)
+        (setq eaf-eafvil--last-focused-wid wid)
+        (eaf-eafvil--send `((type . "set_focus")
+                            (window_id . ,(or wid :json-null))))))))
+
+(add-hook 'window-selection-change-functions #'eaf-eafvil--sync-focus)
 
 ;; ---------------------------------------------------------------------------
 ;; Launch an EAF application

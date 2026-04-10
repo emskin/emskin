@@ -4,7 +4,7 @@ use smithay::{
         KeyboardKeyEvent, MouseButton, PointerAxisEvent, PointerButtonEvent,
     },
     input::{
-        keyboard::FilterResult,
+        keyboard::keysyms,
         pointer::{AxisFrame, ButtonEvent, MotionEvent},
     },
     utils::SERIAL_COUNTER,
@@ -22,25 +22,43 @@ impl EafvilState {
                 let serial = SERIAL_COUNTER.next_serial();
                 let time = Event::time_msec(&event);
 
-                // When focus is on an EAF app and Ctrl/Alt is held,
-                // redirect focus to Emacs so Emacs keybindings (C-x, M-x, etc.) work.
-                let mods = keyboard.modifier_state();
-                if mods.ctrl || mods.alt {
+                // Peek at keysym: only Emacs prefix keys (C-x, C-c, M-x)
+                // redirect focus to Emacs; everything else goes to the focused app.
+                let (is_prefix, mods_changed) = keyboard.input_intercept(
+                    self,
+                    event.key_code(),
+                    event.state(),
+                    |_state, modifiers, keysym_handle| {
+                        let Some(sym) = keysym_handle.raw_latin_sym_or_raw_current_sym() else {
+                            return false;
+                        };
+                        let key = sym.raw();
+                        (modifiers.ctrl
+                            && matches!(key, keysyms::KEY_x | keysyms::KEY_c))
+                            || (modifiers.alt && key == keysyms::KEY_x)
+                    },
+                );
+
+                if is_prefix && self.prefix_saved_focus.is_none() {
+                    self.prefix_saved_focus = Some(keyboard.current_focus());
                     if let Some(emacs) = self.emacs_surface.clone() {
                         if keyboard.current_focus().as_ref() != Some(&emacs) {
-                            let focus_serial = SERIAL_COUNTER.next_serial();
-                            keyboard.set_focus(self, Some(emacs), focus_serial);
+                            keyboard.set_focus(
+                                self,
+                                Some(emacs),
+                                SERIAL_COUNTER.next_serial(),
+                            );
                         }
                     }
                 }
 
-                keyboard.input::<(), _>(
+                keyboard.input_forward(
                     self,
                     event.key_code(),
                     event.state(),
                     serial,
                     time,
-                    |_, _, _| FilterResult::Forward,
+                    mods_changed,
                 );
             }
 
@@ -108,6 +126,7 @@ impl EafvilState {
                     }
 
                     keyboard.set_focus(self, focus, serial);
+                    self.prefix_saved_focus = None;
                 }
 
                 pointer.button(

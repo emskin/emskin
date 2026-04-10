@@ -18,12 +18,8 @@ pub enum IncomingMessage {
         window_id: u64,
         visible: bool,
     },
-    ForwardKey {
-        window_id: u64,
-        keycode: u32,
-        state: u32,
-        modifiers: u32,
-    },
+    /// Emacs finished processing a prefix key sequence; restore app focus.
+    PrefixDone,
     AddMirror {
         window_id: u64,
         view_id: u64,
@@ -51,6 +47,11 @@ pub enum IncomingMessage {
     },
     /// Request an xdg_activation token for launching a new app.
     RequestActivationToken,
+    /// Tell the compositor which surface should have keyboard focus.
+    /// `window_id: None` means focus Emacs; `Some(id)` means focus that app.
+    SetFocus {
+        window_id: Option<u64>,
+    },
 }
 
 /// eafvil → Emacs

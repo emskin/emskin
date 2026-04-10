@@ -42,6 +42,14 @@ pub struct SurfaceLayer {
 }
 
 impl AppWindow {
+    /// Get the primary WlSurface (Wayland toplevel or X11).
+    pub fn wl_surface(&self) -> Option<WlSurface> {
+        self.window
+            .toplevel()
+            .map(|t| t.wl_surface().clone())
+            .or_else(|| self.window.x11_surface().and_then(|x| x.wl_surface()))
+    }
+
     /// Collect the full surface stack: toplevel (offset=0,0) + all popups (recursive).
     /// For Wayland windows this includes xdg popups; for X11 windows just the surface.
     pub fn surface_layers(&self) -> Vec<SurfaceLayer> {

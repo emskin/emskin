@@ -41,6 +41,7 @@ impl XdgActivationHandler for EafvilState {
             });
         }
 
+        self.prefix_saved_focus = None;
         let serial = SERIAL_COUNTER.next_serial();
         if let Some(keyboard) = self.seat.get_keyboard() {
             keyboard.set_focus(self, Some(surface), serial);

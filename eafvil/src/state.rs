@@ -97,6 +97,11 @@ pub struct EafvilState {
     /// Emacs/GTK sets clipboard on startup; we skip that to avoid overriding the host.
     pub clipboard_init_done: bool,
     pub primary_init_done: bool,
+
+    /// Saved keyboard focus before a prefix key redirect (C-x, C-c, M-x).
+    /// `Some(focus)` = prefix active, restore `focus` when done; `None` = normal.
+    /// Cleared on prefix_done IPC, click, or set_focus.
+    pub prefix_saved_focus: Option<Option<WlSurface>>,
 }
 
 impl EafvilState {
@@ -179,6 +184,7 @@ impl EafvilState {
             clipboard: None,
             clipboard_init_done: false,
             primary_init_done: false,
+            prefix_saved_focus: None,
         })
     }
 

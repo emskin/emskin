@@ -242,13 +242,8 @@ fn handle_ipc_message(state: &mut EafvilState, msg: ipc::IncomingMessage) {
         IncomingMessage::SetVisibility { window_id, visible } => {
             ipc_set_visibility(state, window_id, visible);
         }
-        IncomingMessage::ForwardKey {
-            window_id,
-            keycode,
-            state: key_state,
-            modifiers,
-        } => {
-            ipc_forward_key(state, window_id, keycode, key_state, modifiers);
+        IncomingMessage::PrefixDone => {
+            ipc_prefix_done(state);
         }
         IncomingMessage::AddMirror {
             window_id,
@@ -278,6 +273,9 @@ fn handle_ipc_message(state: &mut EafvilState, msg: ipc::IncomingMessage) {
         }
         IncomingMessage::RequestActivationToken => {
             ipc_request_activation_token(state);
+        }
+        IncomingMessage::SetFocus { window_id } => {
+            ipc_set_focus(state, window_id);
         }
     }
 }
@@ -348,63 +346,16 @@ fn ipc_set_visibility(state: &mut EafvilState, window_id: u64, visible: bool) {
     }
 }
 
-fn ipc_forward_key(
-    state: &mut EafvilState,
-    window_id: u64,
-    keycode: u32,
-    key_state: u32,
-    // TODO: modifiers parameter is currently ignored; the injected key event
-    // uses whatever modifier state is already active on the keyboard.
-    // For correct Shift+Tab etc., apply via keyboard.set_modifiers() first.
-    _modifiers: u32,
-) {
-    tracing::debug!("IPC forward_key window={window_id} key={keycode} state={key_state}");
-
-    // Clone the target surface to release the borrow on state.apps.
-    let target = state.apps.get(window_id).and_then(|app| {
-        app.window
-            .toplevel()
-            .map(|t| t.wl_surface().clone())
-            .or_else(|| app.window.x11_surface().and_then(|x| x.wl_surface()))
-    });
-    let Some(target) = target else {
-        tracing::warn!("forward_key: unknown window_id={window_id}");
+fn ipc_prefix_done(state: &mut EafvilState) {
+    let Some(saved) = state.prefix_saved_focus.take() else {
         return;
     };
-
-    // Validate key_state before touching focus to avoid leaking focus state.
-    let press_state = match key_state {
-        1 => smithay::backend::input::KeyState::Pressed,
-        0 => smithay::backend::input::KeyState::Released,
-        other => {
-            tracing::warn!("forward_key: invalid key_state={other}, ignoring");
-            return;
-        }
-    };
-
     let Some(keyboard) = state.seat.get_keyboard() else {
-        tracing::warn!("forward_key: keyboard not available");
         return;
     };
+    tracing::debug!("IPC prefix_done: restoring focus");
     let serial = smithay::utils::SERIAL_COUNTER.next_serial();
-    let time = (state.start_time.elapsed().as_millis() & 0xFFFF_FFFF) as u32;
-
-    // Temporarily switch focus to the EAF app, inject the key, then restore.
-    let saved_focus = keyboard.current_focus();
-    keyboard.set_focus(state, Some(target), serial);
-
-    keyboard.input::<(), _>(
-        state,
-        keycode.into(),
-        press_state,
-        serial,
-        time,
-        |_, _, _| smithay::input::keyboard::FilterResult::Forward,
-    );
-
-    // Restore keyboard focus.
-    let restore_serial = smithay::utils::SERIAL_COUNTER.next_serial();
-    keyboard.set_focus(state, saved_focus, restore_serial);
+    keyboard.set_focus(state, saved, serial);
 }
 
 fn ipc_add_mirror(
@@ -466,6 +417,24 @@ fn ipc_remove_mirror(state: &mut EafvilState, window_id: u64, view_id: u64) {
     if let Some(app) = state.apps.get_mut(window_id) {
         app.mirrors.remove(&view_id);
     }
+}
+
+fn ipc_set_focus(state: &mut EafvilState, window_id: Option<u64>) {
+    let Some(keyboard) = state.seat.get_keyboard() else {
+        return;
+    };
+    let target = match window_id {
+        Some(id) => state
+            .apps
+            .get(id)
+            .and_then(|app| app.wl_surface())
+            .or_else(|| state.emacs_surface.clone()),
+        None => state.emacs_surface.clone(),
+    };
+    tracing::debug!("IPC set_focus window_id={window_id:?}");
+    state.prefix_saved_focus = None;
+    let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+    keyboard.set_focus(state, target, serial);
 }
 
 fn ipc_request_activation_token(state: &mut EafvilState) {
