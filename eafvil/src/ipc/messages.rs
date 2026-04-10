@@ -56,6 +56,31 @@ pub enum IncomingMessage {
     SetCrosshair {
         enabled: bool,
     },
+    /// Set (and enable/disable) the skeleton overlay (frame layout inspector).
+    /// When `enabled` is false, `rects` is ignored and the overlay is cleared.
+    SetSkeleton {
+        enabled: bool,
+        #[serde(default)]
+        rects: Vec<SkeletonRect>,
+    },
+}
+
+/// A single rectangle in the skeleton overlay. Emacs-side kinds currently
+/// in use: "frame", "chrome", "menu-bar", "tool-bar", "tab-bar", "window",
+/// "header-line", "mode-line", "echo-area". Any unknown kind renders with
+/// the default color. `label` is an optional extra description — for
+/// "window" kind it carries the buffer name.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SkeletonRect {
+    pub kind: String,
+    #[serde(default)]
+    pub label: String,
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    #[serde(default)]
+    pub selected: bool,
 }
 
 /// eafvil → Emacs
@@ -97,5 +122,15 @@ pub enum OutgoingMessage {
     /// XWayland is ready — Emacs can set DISPLAY=:<display> for X11 apps.
     XWaylandReady {
         display: u32,
+    },
+    /// User clicked on a skeleton overlay label. Emacs should echo the
+    /// inspected rect in the minibuffer (or wherever useful).
+    SkeletonClicked {
+        kind: String,
+        label: String,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
     },
 }

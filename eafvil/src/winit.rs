@@ -6,10 +6,8 @@ use smithay::{
         renderer::{
             damage::OutputDamageTracker,
             element::{
-                memory::MemoryRenderBufferRenderElement,
-                render_elements,
-                solid::SolidColorRenderElement,
-                texture::TextureRenderElement,
+                memory::MemoryRenderBufferRenderElement, render_elements,
+                solid::SolidColorRenderElement, texture::TextureRenderElement,
             },
             gles::{GlesRenderer, GlesTexture},
             utils::with_renderer_surface_state,
@@ -187,38 +185,59 @@ fn render_frame(
             return;
         };
 
-        // Build mirror elements by referencing the surface's committed texture
-        // directly — zero copy, always up-to-date.
+        // smithay's damage tracker renders elements via
+        // `render_elements.iter().rev()`, so **the first element in the vec
+        // is the topmost layer**. Layer order (top → bottom):
+        //   1. Skeleton labels  (text on top of everything, per user request)
+        //   2. Skeleton borders
+        //   3. Crosshair label + lines
+        //   4. Mirror texture elements (popups → toplevel)
         let scale = output.current_scale().fractional_scale();
-        let mut custom_elements = build_mirror_elements(state, renderer, scale);
+        let mut custom_elements: Vec<CustomElement<GlesRenderer>> = Vec::new();
 
-        // Crosshair overlay (on top of everything).
+        // Skeleton: topmost. Push labels first, borders second, so labels
+        // end up above borders within the skeleton layer group.
+        let output_size_log: Size<i32, Logical> = size.to_f64().to_logical(scale).to_i32_round();
+        let (skel_solids, skel_labels) =
+            state
+                .skeleton
+                .build_elements(renderer, output_size_log, scale);
+        for l in skel_labels {
+            custom_elements.push(l.into());
+        }
+        for s in skel_solids {
+            custom_elements.push(s.into());
+        }
+
+        // Crosshair: above mirrors, below skeleton.
         if let Some(pointer) = state.seat.get_pointer() {
             let cursor = pointer.current_location();
-            let (solids, label) =
-                state.crosshair.build_elements(renderer, cursor, size, scale);
-            for s in solids {
-                custom_elements.push(s.into());
-            }
+            let (solids, label) = state
+                .crosshair
+                .build_elements(renderer, cursor, size, scale);
             if let Some(l) = label {
                 custom_elements.push(l.into());
             }
+            for s in solids {
+                custom_elements.push(s.into());
+            }
         }
 
+        // Mirrors: bottom of the custom layer stack.
+        custom_elements.extend(build_mirror_elements(state, renderer, scale));
+
         let render_scale = 1.0;
-        if let Err(e) =
-            smithay::desktop::space::render_output::<_, CustomElement<GlesRenderer>, _, _>(
-                output,
-                renderer,
-                &mut framebuffer,
-                render_scale,
-                0,
-                [&state.space],
-                &custom_elements,
-                damage_tracker,
-                [1.0, 1.0, 1.0, 1.0],
-            )
-        {
+        if let Err(e) = smithay::desktop::space::render_output::<_, CustomElement<GlesRenderer>, _, _>(
+            output,
+            renderer,
+            &mut framebuffer,
+            render_scale,
+            0,
+            [&state.space],
+            &custom_elements,
+            damage_tracker,
+            [1.0, 1.0, 1.0, 1.0],
+        ) {
             tracing::error!("render_output failed: {e}");
             return;
         }

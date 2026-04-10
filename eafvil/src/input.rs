@@ -33,8 +33,7 @@ impl EafvilState {
                             return false;
                         };
                         let key = sym.raw();
-                        (modifiers.ctrl
-                            && matches!(key, keysyms::KEY_x | keysyms::KEY_c))
+                        (modifiers.ctrl && matches!(key, keysyms::KEY_x | keysyms::KEY_c))
                             || (modifiers.alt && key == keysyms::KEY_x)
                     },
                 );
@@ -43,11 +42,7 @@ impl EafvilState {
                     self.prefix_saved_focus = Some(keyboard.current_focus());
                     if let Some(emacs) = self.emacs_surface.clone() {
                         if keyboard.current_focus().as_ref() != Some(&emacs) {
-                            keyboard.set_focus(
-                                self,
-                                Some(emacs),
-                                SERIAL_COUNTER.next_serial(),
-                            );
+                            keyboard.set_focus(self, Some(emacs), SERIAL_COUNTER.next_serial());
                         }
                     }
                 }
@@ -102,6 +97,41 @@ impl EafvilState {
                 let serial = SERIAL_COUNTER.next_serial();
                 let button = event.button_code();
                 let button_state = event.state();
+
+                // Skeleton panel click interception. Left-button press on
+                // a visible label → flash the target rect, send
+                // SkeletonClicked IPC, and swallow both the press and its
+                // paired release so the downstream surface sees no click.
+                if event.button() == Some(MouseButton::Left) {
+                    if button_state == ButtonState::Pressed {
+                        let pos = pointer.current_location();
+                        if let Some(rect) = self.skeleton.click_at(pos) {
+                            tracing::debug!(
+                                "skeleton label click: kind={} label={:?} ({},{}) {}x{}",
+                                rect.kind,
+                                rect.label,
+                                rect.x,
+                                rect.y,
+                                rect.w,
+                                rect.h,
+                            );
+                            self.ipc.send(crate::ipc::OutgoingMessage::SkeletonClicked {
+                                kind: rect.kind,
+                                label: rect.label,
+                                x: rect.x,
+                                y: rect.y,
+                                w: rect.w,
+                                h: rect.h,
+                            });
+                            self.skeleton_click_absorbed = true;
+                            return;
+                        }
+                    } else if self.skeleton_click_absorbed {
+                        // Absorbed press was followed by its release; drop it.
+                        self.skeleton_click_absorbed = false;
+                        return;
+                    }
+                }
 
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
                     let pos = pointer.current_location();

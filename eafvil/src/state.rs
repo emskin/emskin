@@ -114,6 +114,14 @@ pub struct EafvilState {
 
     /// Crosshair overlay (caliper tool).
     pub crosshair: crate::crosshair::CrosshairOverlay,
+
+    /// Skeleton overlay (frame layout inspector).
+    pub skeleton: crate::skeleton::SkeletonOverlay,
+
+    /// Set to true when a left-button press was swallowed by a skeleton
+    /// label hit-test. The matching release must also be swallowed so the
+    /// downstream surface never sees an unpaired release.
+    pub skeleton_click_absorbed: bool,
 }
 
 impl EafvilState {
@@ -199,6 +207,8 @@ impl EafvilState {
             primary_init_done: false,
             prefix_saved_focus: None,
             crosshair: crate::crosshair::CrosshairOverlay::new(),
+            skeleton: crate::skeleton::SkeletonOverlay::new(),
+            skeleton_click_absorbed: false,
         })
     }
 

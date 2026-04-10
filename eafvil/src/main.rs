@@ -5,6 +5,7 @@ mod crosshair;
 mod handlers;
 mod input;
 pub mod ipc;
+mod skeleton;
 mod state;
 mod utils;
 mod winit;
@@ -343,6 +344,15 @@ fn handle_ipc_message(state: &mut EafvilState, msg: ipc::IncomingMessage) {
         IncomingMessage::SetCrosshair { enabled } => {
             tracing::debug!("IPC set_crosshair enabled={enabled}");
             state.crosshair.enabled = enabled;
+        }
+        IncomingMessage::SetSkeleton { enabled, rects } => {
+            tracing::debug!("IPC set_skeleton enabled={enabled} rects={}", rects.len());
+            state.skeleton.enabled = enabled;
+            if enabled {
+                state.skeleton.set_rects(rects);
+            } else {
+                state.skeleton.clear();
+            }
         }
     }
 }

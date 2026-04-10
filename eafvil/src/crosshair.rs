@@ -97,7 +97,10 @@ impl CrosshairOverlay {
         cursor_logical: Point<f64, Logical>,
         output_size_phys: Size<i32, Physical>,
         scale: f64,
-    ) -> (Vec<SolidColorRenderElement>, Option<MemoryRenderBufferRenderElement<GlesRenderer>>) {
+    ) -> (
+        Vec<SolidColorRenderElement>,
+        Option<MemoryRenderBufferRenderElement<GlesRenderer>>,
+    ) {
         if !self.enabled {
             return (Vec::new(), None);
         }
@@ -144,8 +147,16 @@ impl CrosshairOverlay {
         };
         let fits_right = cursor_log.x + label_offset + label_size.w <= output_log.w;
         let fits_below = cursor_log.y + label_offset + label_size.h <= output_log.h;
-        let lx = if fits_right { cursor_log.x + label_offset } else { cursor_log.x - label_offset - label_size.w };
-        let ly = if fits_below { cursor_log.y + label_offset } else { cursor_log.y - label_offset - label_size.h };
+        let lx = if fits_right {
+            cursor_log.x + label_offset
+        } else {
+            cursor_log.x - label_offset - label_size.w
+        };
+        let ly = if fits_below {
+            cursor_log.y + label_offset
+        } else {
+            cursor_log.y - label_offset - label_size.h
+        };
         let label_loc = Point::<f64, Logical>::from((lx as f64, ly as f64)).to_physical(s);
 
         let label = MemoryRenderBufferRenderElement::from_buffer(

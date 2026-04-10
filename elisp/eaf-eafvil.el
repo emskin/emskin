@@ -29,6 +29,18 @@ Shows crosshair lines and coordinates at the cursor position."
            (eaf-eafvil--send `((type . "set_crosshair")
                                (enabled . ,(if val t :json-false)))))))
 
+(defcustom eaf-eafvil-skeleton nil
+  "Non-nil to enable the skeleton overlay (frame layout inspector).
+Draws wireframe rectangles around frame chrome, every window, its
+header-line/mode-line, and the echo area with coordinates and sizes."
+  :type 'boolean
+  :group 'eaf-eafvil
+  :initialize #'custom-initialize-default
+  :set (lambda (sym val)
+         (set-default sym val)
+         (when (bound-and-true-p eaf-eafvil--process)
+           (eaf-eafvil--push-skeleton val))))
+
 ;; ---------------------------------------------------------------------------
 ;; Internal state
 ;; ---------------------------------------------------------------------------
@@ -171,6 +183,17 @@ Coerces buffer to unibyte so aref always yields raw byte values 0-255."
         ;; Re-sync all EAF windows now that we have the correct offset.
         (dolist (frame (frame-list))
           (eaf-eafvil--sync-all frame))))
+     ((string= type "skeleton_clicked")
+      (let ((kind (gethash "kind" msg ""))
+            (label (gethash "label" msg ""))
+            (x (gethash "x" msg 0))
+            (y (gethash "y" msg 0))
+            (w (gethash "w" msg 0))
+            (h (gethash "h" msg 0)))
+        (message "eafvil skeleton: %s%s (%d,%d) %dx%d"
+                 kind
+                 (if (string-empty-p label) "" (format " [%s]" label))
+                 x y w h)))
      (t
       (message "eafvil: unknown message type %s" type)))))
 
@@ -448,6 +471,149 @@ Covers the full window width (including fringes) but excludes the mode-line."
 
 (add-hook 'window-size-change-functions #'eaf-eafvil--sync-all)
 (add-hook 'window-buffer-change-functions #'eaf-eafvil--sync-all)
+
+;; ---------------------------------------------------------------------------
+;; Skeleton overlay (frame layout inspector)
+;; ---------------------------------------------------------------------------
+
+(defun eaf-eafvil--skeleton-rect (kind label x y w h selected)
+  "Build one skeleton rect alist."
+  `((kind . ,kind)
+    (label . ,(or label ""))
+    (x . ,x)
+    (y . ,y)
+    (w . ,w)
+    (h . ,h)
+    (selected . ,(if selected t :json-false))))
+
+(defun eaf-eafvil--collect-skeleton-rects ()
+  "Return a list of rect alists describing the selected frame's layout.
+Coordinates are in pixels relative to the top-left of the Wayland surface,
+matching the convention used by `eaf-eafvil--window-geometry'."
+  (let* ((frame (selected-frame))
+         (geom (frame-geometry frame))
+         (selected-win (selected-window))
+         (off (eaf-eafvil--frame-header-offset frame))
+         ;; On pgtk, `outer-size' in `frame-geometry' does NOT include the
+         ;; external GTK menu-bar / tool-bar heights (same architectural
+         ;; limitation as `menu-bar-size'). Compute the true surface height
+         ;; from `frame-pixel-height' + chrome offset so the frame rect
+         ;; actually wraps the whole compositor window.
+         (outer-w (frame-pixel-width frame))
+         (outer-h (+ (frame-pixel-height frame) off))
+         (raw-mb-h (or (cdr (alist-get 'menu-bar-size geom)) 0))
+         (raw-tb-h (or (cdr (alist-get 'tool-bar-size geom)) 0))
+         (tab-h (or (cdr (alist-get 'tab-bar-size geom)) 0))
+         ;; pgtk reports 0 for external GTK bar sizes. If either is 0 but
+         ;; the total chrome offset is larger than the known side, derive
+         ;; the missing one so both bars can be drawn in their correct
+         ;; positions instead of stacking at y=0.
+         (mb-h (cond ((and (zerop raw-mb-h) (> off raw-tb-h)) (- off raw-tb-h))
+                     (t raw-mb-h)))
+         (tb-h (cond ((and (zerop raw-tb-h) (> off raw-mb-h)) (- off raw-mb-h))
+                     (t raw-tb-h)))
+         (rects nil))
+    ;; Frame outer rectangle.
+    (push (eaf-eafvil--skeleton-rect "frame" "" 0 0 outer-w outer-h nil) rects)
+    ;; External chrome aggregate (menu-bar + tool-bar). Kept as a bounding
+    ;; rect even when individual bars are drawn on top, so the label shows
+    ;; the total `off` value for debugging.
+    (when (> off 0)
+      (push (eaf-eafvil--skeleton-rect
+             "chrome" (format "off=%d" off) 0 0 outer-w off nil)
+            rects))
+    ;; Menu bar (top of the external chrome).
+    (when (> mb-h 0)
+      (push (eaf-eafvil--skeleton-rect "menu-bar" "" 0 0 outer-w mb-h nil)
+            rects))
+    ;; Tool bar (below the menu bar).
+    (when (> tb-h 0)
+      (push (eaf-eafvil--skeleton-rect "tool-bar" "" 0 mb-h outer-w tb-h nil)
+            rects))
+    ;; Tab bar (internal, sits just below the external chrome).
+    (when (> tab-h 0)
+      (push (eaf-eafvil--skeleton-rect "tab-bar" "" 0 off outer-w tab-h nil)
+            rects))
+    ;; Each live window: full rect + header-line strip + mode-line strip.
+    (dolist (win (window-list frame 'no-minibuf))
+      (let* ((edges (window-pixel-edges win))
+             (body-edges (window-body-pixel-edges win))
+             (raw-x (nth 0 edges))
+             (raw-y (nth 1 edges))
+             (raw-r (nth 2 edges))
+             (raw-b (nth 3 edges))
+             (body-top (nth 1 body-edges))
+             (body-bot (nth 3 body-edges))
+             (x raw-x)
+             (y (+ raw-y off))
+             (w (- raw-r raw-x))
+             (h (- raw-b raw-y))
+             (sel (eq win selected-win))
+             (buf-title (buffer-name (window-buffer win))))
+        (push (eaf-eafvil--skeleton-rect "window" buf-title x y w h sel)
+              rects)
+        (when (> body-top raw-y)
+          (push (eaf-eafvil--skeleton-rect
+                 "header-line" "" x y w (- body-top raw-y) nil)
+                rects))
+        (when (> raw-b body-bot)
+          (push (eaf-eafvil--skeleton-rect
+                 "mode-line" "" x (+ body-bot off) w (- raw-b body-bot) nil)
+                rects))))
+    ;; Echo area / minibuffer window.
+    (let ((mwin (minibuffer-window frame)))
+      (when (and mwin (window-live-p mwin))
+        (let* ((edges (window-pixel-edges mwin))
+               (x (nth 0 edges))
+               (y (+ (nth 1 edges) off))
+               (w (- (nth 2 edges) (nth 0 edges)))
+               (h (- (nth 3 edges) (nth 1 edges))))
+          (when (and (> w 0) (> h 0))
+            (push (eaf-eafvil--skeleton-rect "echo-area" "" x y w h nil)
+                  rects)))))
+    (nreverse rects)))
+
+(defvar eaf-eafvil--last-skeleton-rects 'unset
+  "Last rect list sent via set_skeleton IPC, used for change detection.
+Auto-refresh hooks fire on every window-command, so without this guard
+we'd re-send an identical payload on every keystroke.")
+
+(defun eaf-eafvil--push-skeleton (enabled)
+  "Send the current skeleton state (bool ENABLED) to the compositor.
+Skips IPC when the rect list is identical to the last one sent."
+  (when eaf-eafvil--process
+    (if (not enabled)
+        (unless (null eaf-eafvil--last-skeleton-rects)
+          (setq eaf-eafvil--last-skeleton-rects nil)
+          (eaf-eafvil--send '((type . "set_skeleton")
+                              (enabled . :json-false)
+                              (rects . []))))
+      (let ((rects (eaf-eafvil--collect-skeleton-rects)))
+        (unless (equal rects eaf-eafvil--last-skeleton-rects)
+          (setq eaf-eafvil--last-skeleton-rects rects)
+          (eaf-eafvil--send
+           `((type . "set_skeleton")
+             (enabled . t)
+             (rects . ,(vconcat rects)))))))))
+
+(defun eaf-eafvil-toggle-skeleton ()
+  "Toggle the skeleton overlay (frame layout inspector)."
+  (interactive)
+  (customize-set-variable 'eaf-eafvil-skeleton (not eaf-eafvil-skeleton)))
+
+(defun eaf-eafvil-refresh-skeleton ()
+  "Re-send the current frame layout as the skeleton overlay."
+  (interactive)
+  (when eaf-eafvil-skeleton
+    (eaf-eafvil--push-skeleton t)))
+
+(defun eaf-eafvil--skeleton-auto-refresh (&optional _frame)
+  "Hook: refresh skeleton when layout changes, only if the overlay is enabled."
+  (when eaf-eafvil-skeleton
+    (eaf-eafvil--push-skeleton t)))
+
+(add-hook 'window-size-change-functions #'eaf-eafvil--skeleton-auto-refresh)
+(add-hook 'window-buffer-change-functions #'eaf-eafvil--skeleton-auto-refresh)
 
 (defun eaf-eafvil--sync-focus (&optional _frame)
   "Tell the compositor which surface should have keyboard focus.

@@ -238,8 +238,16 @@ impl X11ClipboardProxy {
         // so responses don't collide with later XFixes-triggered queries.
         let mut pending_converts = HashMap::new();
         for (sel, target, init_prop) in [
-            (atoms.CLIPBOARD, SelectionTarget::Clipboard, atoms._EAFVIL_CLIP_INIT),
-            (atoms.PRIMARY, SelectionTarget::Primary, atoms._EAFVIL_PRIM_INIT),
+            (
+                atoms.CLIPBOARD,
+                SelectionTarget::Clipboard,
+                atoms._EAFVIL_CLIP_INIT,
+            ),
+            (
+                atoms.PRIMARY,
+                SelectionTarget::Primary,
+                atoms._EAFVIL_PRIM_INIT,
+            ),
         ] {
             let owner = conn
                 .get_selection_owner(sel)
