@@ -42,6 +42,7 @@ impl SeatHandler for EmskinState {
         _seat: &Seat<Self>,
         image: smithay::input::pointer::CursorImageStatus,
     ) {
+        tracing::trace!("cursor_image: {:?}", image);
         // Normalize Surface → Default: winit can't render client cursor surfaces,
         // and dropping Surface early avoids holding a WlSurface reference.
         let image = match image {

@@ -127,7 +127,9 @@ impl XdgShellHandler for EmskinState {
     }
 
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
+        tracing::debug!("popup grab requested, serial={:?}", serial);
         let Some(seat) = Seat::<EmskinState>::from_resource(&seat) else {
+            tracing::warn!("popup grab: seat not found");
             return;
         };
         let kind = PopupKind::Xdg(surface);
@@ -135,29 +137,39 @@ impl XdgShellHandler for EmskinState {
         if let Ok(root) = find_popup_root_surface(&kind) {
             let ret = self.popups.grab_popup(root, kind, &seat, serial);
 
-            if let Ok(mut grab) = ret {
-                if let Some(keyboard) = seat.get_keyboard() {
-                    if keyboard.is_grabbed()
-                        && !(keyboard.has_grab(serial)
-                            || keyboard.has_grab(grab.previous_serial().unwrap_or(serial)))
-                    {
-                        grab.ungrab(PopupUngrabStrategy::All);
-                        return;
+            match ret {
+                Ok(mut grab) => {
+                    if let Some(keyboard) = seat.get_keyboard() {
+                        if keyboard.is_grabbed()
+                            && !(keyboard.has_grab(serial)
+                                || keyboard.has_grab(grab.previous_serial().unwrap_or(serial)))
+                        {
+                            tracing::debug!("popup grab: keyboard already grabbed, ungrabbing");
+                            grab.ungrab(PopupUngrabStrategy::All);
+                            return;
+                        }
+                        keyboard.set_focus(self, grab.current_grab(), serial);
+                        keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
                     }
-                    keyboard.set_focus(self, grab.current_grab(), serial);
-                    keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
+                    if let Some(pointer) = seat.get_pointer() {
+                        if pointer.is_grabbed()
+                            && !(pointer.has_grab(serial)
+                                || pointer.has_grab(grab.previous_serial().unwrap_or(serial)))
+                        {
+                            tracing::debug!("popup grab: pointer already grabbed, ungrabbing");
+                            grab.ungrab(PopupUngrabStrategy::All);
+                            return;
+                        }
+                        pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
+                        tracing::debug!("popup grab: pointer grab set successfully");
+                    }
                 }
-                if let Some(pointer) = seat.get_pointer() {
-                    if pointer.is_grabbed()
-                        && !(pointer.has_grab(serial)
-                            || pointer.has_grab(grab.previous_serial().unwrap_or(serial)))
-                    {
-                        grab.ungrab(PopupUngrabStrategy::All);
-                        return;
-                    }
-                    pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
+                Err(e) => {
+                    tracing::warn!("popup grab failed: {:?}", e);
                 }
             }
+        } else {
+            tracing::warn!("popup grab: could not find root surface");
         }
     }
 

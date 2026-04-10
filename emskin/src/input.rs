@@ -7,7 +7,9 @@ use smithay::{
         keyboard::keysyms,
         pointer::{AxisFrame, ButtonEvent, MotionEvent},
     },
+    reexports::wayland_server::Resource,
     utils::SERIAL_COUNTER,
+    wayland::seat::WaylandFocus,
 };
 
 use crate::state::EmskinState;
@@ -74,6 +76,18 @@ impl EmskinState {
                 let serial = SERIAL_COUNTER.next_serial();
                 let under = self.surface_under(pos);
 
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    let new_id = under.as_ref().map(|(s, _)| s.id());
+                    let old_id = pointer.current_focus().map(|s| s.id());
+                    if new_id != old_id {
+                        let loc = under.as_ref().map(|(_, p)| *p);
+                        tracing::debug!(
+                            "pointer focus change: {:?} -> {:?} pos=({:.0},{:.0}) loc={:?}",
+                            old_id, new_id, pos.x, pos.y, loc,
+                        );
+                    }
+                }
+
                 pointer.motion(
                     self,
                     under,
@@ -135,8 +149,14 @@ impl EmskinState {
 
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
                     let pos = pointer.current_location();
-                    let clicked = self.surface_under(pos).map(|(s, _)| s);
-                    let focus = clicked.or_else(|| self.emacs_surface.clone());
+                    let under = self.surface_under(pos);
+                    tracing::debug!(
+                        "button press: pos=({:.0},{:.0}) under={:?} ptr_focus={:?}",
+                        pos.x, pos.y,
+                        under.as_ref().map(|(s, _)| s.id()),
+                        pointer.current_focus().map(|s| s.id()),
+                    );
+                    let focus = under.map(|(s, _)| s).or_else(|| self.emacs_surface.clone());
 
                     // Left-click on an embedded app → tell Emacs to select that window.
                     if event.button() == Some(MouseButton::Left) {
@@ -155,8 +175,20 @@ impl EmskinState {
                         }
                     }
 
-                    keyboard.set_focus(self, focus, serial);
-                    self.prefix_saved_focus = None;
+                    // Only change keyboard focus when clicking a different client.
+                    // Clicking a popup surface from the same client (e.g. Firefox
+                    // menu) must NOT send wl_keyboard.leave to the toplevel —
+                    // otherwise the client dismisses the popup before processing
+                    // the button event.
+                    let same_client = focus.as_ref().is_some_and(|new| {
+                        keyboard
+                            .current_focus()
+                            .is_some_and(|old| old.same_client_as(&new.id()))
+                    });
+                    if !same_client {
+                        keyboard.set_focus(self, focus, serial);
+                        self.prefix_saved_focus = None;
+                    }
                 }
 
                 pointer.button(
