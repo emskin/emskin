@@ -38,6 +38,7 @@
 - Mirror rendering: `TextureRenderElement` needs `buffer_scale`, `buffer_transform`, and viewport `src` from `RendererSurfaceState` — otherwise size is wrong under fractional scaling
 - Mirror input: `surface_under()` must check mirrors BEFORE space — Emacs is fullscreen and `element_under()` always hits it first, blocking mirror detection
 - Mirror input: pointer `under_position` for mirrors needs offset compensation (`pos - mapped_pos`) so smithay computes correct surface-local coords
+- Mirror input: `surface_under()` for mirrors must compensate `window.geometry().loc` — same CSD shadow offset that the space path handles via `render_location = space_loc - geometry.loc`. Add `wg` to `local` point and subtract `wg` from `surface_global` in the return mapping, otherwise cursor hits shadow area instead of visible content
 - Mirror scaling: aspect-fit with top-left alignment; coordinate mapping in `mirror_under` uses `rel.downscale(ratio)` to map mirror→source; `AppManager::aspect_fit_ratio()` returns None for zero-size to prevent NaN
 - `render_output`'s second type param is the custom_elements type (not space element type); `render_scale` (value 1.0) is actually the `alpha` parameter
 - `render_elements!` macro cannot parse associated-type bounds (`Renderer<TextureId = GlesTexture>`) — define a blanket helper trait as workaround
@@ -49,6 +50,8 @@
 - Elisp: use `window-body-pixel-edges` for embedded app geometry (excludes fringes/margins/header-line/mode-line). Set buffer-local `left-fringe-width`, `right-fringe-width`, `left-margin-width`, `right-margin-width` to 0 and `cursor-type` to nil for EAF buffers
 - Elisp: `set-window-scroll-bars` is non-persistent across buffer switches — re-apply in `emskin--sync-all` with `window-scroll-bars` change-detection guard
 - Elisp skeleton: guard bar height fallback with `frame-parameter 'menu-bar-lines/tool-bar-lines/tab-bar-lines` — pgtk fallback incorrectly derives non-zero heights for disabled bars without this check
+- Popup input: clicking a popup surface must NOT change keyboard focus if the popup belongs to the same Wayland client as the current focus — `wl_keyboard.leave` on the parent toplevel causes Firefox/Chrome to dismiss the popup before processing the button event. Use `same_client_as()` guard before `keyboard.set_focus()`
+- Popup input: browsers (Firefox, Chrome) may open menus as `xdg_popup` WITHOUT requesting `xdg_popup.grab` — the compositor must handle ungrabbed popups via the normal pointer focus path (no `PopupPointerGrab`)
 
 ## Wayland Protocols Implemented
 - xdg_shell (toplevel, popup)

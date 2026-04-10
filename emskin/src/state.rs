@@ -303,12 +303,15 @@ impl EmskinState {
         if let Some((window_id, _view_id, mapped_pos)) = self.apps.mirror_under(pos) {
             if let Some(app) = self.apps.get(window_id) {
                 if let Some(geo) = app.geometry {
-                    let local = mapped_pos - geo.loc.to_f64();
+                    // Compensate window_geometry (CSD shadow offset) — same
+                    // as the space path where render_location = space_loc - wg.
+                    let wg = app.window.geometry().loc;
+                    let local = mapped_pos - geo.loc.to_f64() + wg.to_f64();
                     let result =
                         app.window
                             .surface_under(local, WindowSurfaceType::ALL)
                             .map(|(s, p)| {
-                                let surface_global = (p + geo.loc).to_f64();
+                                let surface_global = (p + geo.loc - wg).to_f64();
                                 let offset = pos - mapped_pos;
                                 (s, surface_global + offset)
                             });
