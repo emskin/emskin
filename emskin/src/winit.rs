@@ -20,7 +20,10 @@ use smithay::{
         pointer::{CursorImageStatus, CursorImageSurfaceData},
     },
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
-    reexports::{calloop::EventLoop, wayland_server::protocol::wl_surface::WlSurface},
+    reexports::{
+        calloop::EventLoop,
+        wayland_server::{protocol::wl_surface::WlSurface, Resource},
+    },
     utils::{Logical, Physical, Point, Rectangle, Size, Transform, SERIAL_COUNTER},
     wayland::compositor::{with_states, with_surface_tree_downward, TraversalAction},
 };
@@ -268,19 +271,21 @@ fn render_frame(
         // Software cursor: topmost layer. Used for Surface cursors (GTK3/Emacs)
         // that can't be forwarded to the host via winit's CursorIcon API.
         if let CursorImageStatus::Surface(ref surface) = state.cursor_status {
-            if let Some(pointer) = state.seat.get_pointer() {
+            if !surface.is_alive() {
+                state.cursor_status = CursorImageStatus::default_named();
+                state.cursor_changed = true;
+            } else if let Some(pointer) = state.seat.get_pointer() {
                 if let Err(e) = import_surface_tree(renderer, surface) {
                     tracing::warn!("cursor import_surface_tree failed: {e:?}");
                 } else {
-                    let hotspot = with_states(surface, |data| {
-                        data.data_map
-                            .get::<CursorImageSurfaceData>()
-                            .map(|d| d.lock().unwrap().hotspot)
-                            .unwrap_or_default()
-                    });
-                    let cursor_pos = pointer.current_location() - hotspot.to_f64();
+                    let cursor_pos = pointer.current_location();
                     let ctx = renderer.context_id();
                     with_states(surface, |data| {
+                        let hotspot = data
+                            .data_map
+                            .get::<CursorImageSurfaceData>()
+                            .map(|d| d.lock().unwrap().hotspot)
+                            .unwrap_or_default();
                         let Some(rss) = data.data_map.get::<RendererSurfaceStateUserData>() else {
                             return;
                         };
@@ -289,11 +294,12 @@ fn render_frame(
                             return;
                         };
                         let view = rss.view();
+                        let pos = (cursor_pos - hotspot.to_f64()).to_physical(scale);
                         custom_elements.push(
                             TextureRenderElement::from_static_texture(
                                 Id::from_wayland_resource(surface),
                                 ctx.clone(),
-                                cursor_pos.to_physical(scale),
+                                pos,
                                 texture,
                                 rss.buffer_scale(),
                                 rss.buffer_transform(),
