@@ -29,6 +29,17 @@ emskin 是一个嵌套 Wayland 合成器：在一个 winit 窗口内运行独立
 
 > **推荐使用 pgtk (pure GTK) 版本的 Emacs**（`--with-pgtk` 编译），体验最佳。GTK3 X11 版本通过 XWayland 支持，包括全屏、嵌入应用、剪贴板同步、光标形状跟随等核心功能，但窗口几何计算可能有偏差。
 
+## 兼容性
+
+| 桌面环境 | Wayland | X11 |
+|----------|---------|-----|
+| GNOME    | ✓       | ✓   |
+| KDE      | ✓       | ✓   |
+| Sway     | ✓       | —   |
+| COSMIC   | ✓       | —   |
+
+Emacs 版本：pgtk（推荐）和 GTK3 X11（通过 XWayland）均支持。
+
 ## 依赖
 
 - Rust 1.70+
