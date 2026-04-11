@@ -1,6 +1,9 @@
-//! Workspace bar — a top-of-screen strip showing workspace buttons.
+//! Workspace bar — a top-of-screen strip showing workspace buttons + center title.
 //! Only visible when there are 2+ workspaces and --bar=builtin.
-//! Clicking a button switches to that workspace.
+//!
+//! Layout: [pill buttons on left]  [active workspace title centered]
+//! Active button = Catppuccin Blue pill + dark text.
+//! Inactive button = gray text only.
 
 use cosmic_text::{
     Attrs, Buffer as CtBuffer, Color as CtColor, Family, FontSystem, Metrics, Shaping, SwashCache,
@@ -22,33 +25,38 @@ use smithay::{
 };
 
 pub const BAR_HEIGHT: i32 = 28;
-const BUTTON_W: i32 = 40;
-const BUTTON_H: i32 = 22;
-const BUTTON_PAD: i32 = 4;
-const BUTTON_MARGIN_LEFT: i32 = 6;
-const BUTTON_MARGIN_TOP: i32 = 3;
+const PILL_H: i32 = 20;
+const PILL_PAD_H: i32 = 6;
+const INACTIVE_PAD_H: i32 = 2;
+const PILL_RADIUS: f32 = 6.0;
+const BUTTON_GAP: i32 = 6;
+const BAR_MARGIN_LEFT: i32 = 6;
 const FONT_SIZE: f32 = 13.0;
 const LINE_HEIGHT: f32 = 15.0;
-const LABEL_PAD: i32 = 2;
+const TITLE_FONT_SIZE: f32 = 12.0;
+const TITLE_LINE_HEIGHT: f32 = 14.0;
+// 1px padding around text labels for glyph anti-aliasing overflow.
+const TEXT_LABEL_PAD: i32 = 1;
 
-// Colors (RGBA linear for SolidColorRenderElement).
-const BAR_BG: [f32; 4] = [0.12, 0.12, 0.15, 0.95];
-const BUTTON_ACTIVE: [f32; 4] = [0.25, 0.55, 0.95, 1.0];
-const BUTTON_INACTIVE: [f32; 4] = [0.22, 0.22, 0.27, 0.9];
-// Label background (BGRA for MemoryRenderBuffer).
-const LABEL_BG_ACTIVE: [u8; 4] = [242, 140, 64, 255]; // BGRA of BUTTON_ACTIVE
-const LABEL_BG_INACTIVE: [u8; 4] = [69, 56, 56, 230]; // BGRA of BUTTON_INACTIVE
-const LABEL_FG: [u8; 4] = [255, 255, 255, 255]; // white BGRA
+// Catppuccin Mocha Base #1e1e2e at 95% (RGBA linear for SolidColorRenderElement).
+const BAR_BG: [f32; 4] = [0.118, 0.118, 0.180, 0.95];
+// Catppuccin Surface0 #313244.
+const SEP_COLOR: [f32; 4] = [0.192, 0.196, 0.267, 1.0];
+
+// BGRA colors for MemoryRenderBuffer pixel rendering.
+const PILL_BG: [u8; 4] = [250, 180, 137, 217]; // Catppuccin Blue #89b4fa at 85%
+const ACTIVE_FG: [u8; 4] = [46, 30, 30, 255]; // Catppuccin Base #1e1e2e
+const INACTIVE_FG: [u8; 4] = [134, 112, 108, 255]; // Catppuccin Overlay0 #6c7086
+const TITLE_FG: [u8; 4] = [200, 173, 166, 255]; // Catppuccin Subtext0 #a6adc8
 
 struct BarButton {
     workspace_id: u64,
     active: bool,
     label_buf: MemoryRenderBuffer,
     commit: CommitCounter,
-    button_id: Id,
     /// Logical hit rect for click detection.
     hit_rect: Rectangle<i32, Logical>,
-    label_size: (i32, i32),
+    buf_size: (i32, i32),
     last_text: String,
     last_active: bool,
 }
@@ -66,9 +74,8 @@ impl BarButton {
                 None,
             ),
             commit: CommitCounter::default(),
-            button_id: Id::new(),
             hit_rect: Rectangle::default(),
-            label_size: (0, 0),
+            buf_size: (0, 0),
             last_text: String::new(),
             last_active: false,
         }
@@ -81,6 +88,13 @@ pub struct WorkspaceBar {
     buttons: Vec<BarButton>,
     bg_id: Id,
     bg_commit: CommitCounter,
+    sep_id: Id,
+    sep_commit: CommitCounter,
+    // Center title.
+    title_buf: MemoryRenderBuffer,
+    title_commit: CommitCounter,
+    title_size: (i32, i32),
+    last_title: String,
 }
 
 impl WorkspaceBar {
@@ -91,6 +105,18 @@ impl WorkspaceBar {
             buttons: Vec::new(),
             bg_id: Id::new(),
             bg_commit: CommitCounter::default(),
+            sep_id: Id::new(),
+            sep_commit: CommitCounter::default(),
+            title_buf: MemoryRenderBuffer::new(
+                Fourcc::Argb8888,
+                (1, 1),
+                1,
+                Transform::Normal,
+                None,
+            ),
+            title_commit: CommitCounter::default(),
+            title_size: (0, 0),
+            last_title: String::new(),
         }
     }
 
@@ -110,40 +136,46 @@ impl WorkspaceBar {
         }
     }
 
-    /// Update the bar's workspace list. Re-renders labels only when changed.
-    pub fn update(&mut self, workspace_ids: &[u64], active_id: u64) {
+    /// Update the bar's workspace list and title. Re-renders only when changed.
+    pub fn update(
+        &mut self,
+        workspaces: &[(u64, &str)], // (id, name) pairs
+        active_id: u64,
+    ) {
+        let old_count = self.buttons.len();
+
         // Grow/shrink button pool.
-        while self.buttons.len() < workspace_ids.len() {
+        while self.buttons.len() < workspaces.len() {
             self.buttons.push(BarButton::new());
         }
-        self.buttons.truncate(workspace_ids.len());
+        self.buttons.truncate(workspaces.len());
 
-        for (i, (&ws_id, btn)) in workspace_ids
-            .iter()
-            .zip(self.buttons.iter_mut())
-            .enumerate()
-        {
+        // Bar visibility changed → damage bg/sep.
+        if (old_count > 1) != (self.buttons.len() > 1) {
+            self.bg_commit.increment();
+            self.sep_commit.increment();
+        }
+
+        let mut x_cursor = BAR_MARGIN_LEFT;
+        let mut active_name = "";
+
+        for (&(ws_id, name), btn) in workspaces.iter().zip(self.buttons.iter_mut()) {
             btn.workspace_id = ws_id;
             let is_active = ws_id == active_id;
             let text = ws_id.to_string();
             let changed = text != btn.last_text || is_active != btn.last_active;
 
+            if is_active {
+                active_name = name;
+            }
+
             if changed {
                 btn.active = is_active;
-
-                if self.font_system.is_none() {
-                    self.font_system = Some(FontSystem::new());
-                }
-                let font_system = self.font_system.as_mut().unwrap();
-                let bg = if is_active {
-                    LABEL_BG_ACTIVE
-                } else {
-                    LABEL_BG_INACTIVE
-                };
-                btn.label_size = render_button_label(
+                let font_system = self.font_system.get_or_insert_with(FontSystem::new);
+                btn.buf_size = render_pill_button(
                     &mut btn.label_buf,
                     &text,
-                    bg,
+                    is_active,
                     font_system,
                     &mut self.swash_cache,
                 );
@@ -152,10 +184,29 @@ impl WorkspaceBar {
                 btn.commit.increment();
             }
 
-            // Compute hit rect (logical).
-            let x = BUTTON_MARGIN_LEFT + i as i32 * (BUTTON_W + BUTTON_PAD);
-            let y = BUTTON_MARGIN_TOP;
-            btn.hit_rect = Rectangle::new((x, y).into(), (BUTTON_W, BUTTON_H).into());
+            let y = (BAR_HEIGHT - PILL_H) / 2;
+            btn.hit_rect = Rectangle::new((x_cursor, y).into(), (btn.buf_size.0, PILL_H).into());
+            x_cursor += btn.buf_size.0 + BUTTON_GAP;
+        }
+
+        // Update center title if changed.
+        if active_name != self.last_title {
+            if active_name.is_empty() {
+                self.title_size = (0, 0);
+            } else {
+                let font_system = self.font_system.get_or_insert_with(FontSystem::new);
+                self.title_size = render_text_label(
+                    &mut self.title_buf,
+                    active_name,
+                    &TITLE_FG,
+                    TITLE_FONT_SIZE,
+                    TITLE_LINE_HEIGHT,
+                    font_system,
+                    &mut self.swash_cache,
+                );
+            }
+            self.last_title = active_name.to_string();
+            self.title_commit.increment();
         }
     }
 
@@ -192,8 +243,8 @@ impl WorkspaceBar {
         }
 
         let s: Scale<f64> = Scale::from(scale);
-        let mut solids = Vec::with_capacity(1 + self.buttons.len());
-        let mut labels = Vec::with_capacity(self.buttons.len());
+        let mut solids = Vec::with_capacity(2);
+        let mut labels = Vec::with_capacity(self.buttons.len() + 1);
 
         // Bar background — full width, BAR_HEIGHT tall.
         let bg_phys_size = Size::<i32, Physical>::from((
@@ -208,37 +259,47 @@ impl WorkspaceBar {
             Kind::Unspecified,
         ));
 
-        // Button backgrounds + labels.
+        // Bottom separator line — 1px logical.
+        let sep_y = ((BAR_HEIGHT - 1) as f64 * scale).round() as i32;
+        let sep_phys_size =
+            Size::<i32, Physical>::from((bg_phys_size.w, (1.0 * scale).round().max(1.0) as i32));
+        solids.push(SolidColorRenderElement::new(
+            self.sep_id.clone(),
+            Rectangle::new(Point::<i32, Physical>::from((0, sep_y)), sep_phys_size),
+            self.sep_commit,
+            SEP_COLOR,
+            Kind::Unspecified,
+        ));
+
+        // Button labels (pill or text-only).
         for btn in &self.buttons {
-            let color = if btn.active {
-                BUTTON_ACTIVE
-            } else {
-                BUTTON_INACTIVE
-            };
             let r = btn.hit_rect;
-            let tl = Point::<f64, Logical>::from((r.loc.x as f64, r.loc.y as f64))
-                .to_physical(s)
-                .to_i32_round();
-            let sz = Size::<f64, Logical>::from((r.size.w as f64, r.size.h as f64))
-                .to_physical(s)
-                .to_i32_round();
+            let buf_y = (BAR_HEIGHT as f64 - btn.buf_size.1 as f64) / 2.0;
+            let loc = Point::<f64, Logical>::from((r.loc.x as f64, buf_y)).to_physical(s);
 
-            solids.push(SolidColorRenderElement::new(
-                btn.button_id.clone(),
-                Rectangle::new(tl, sz),
-                btn.commit,
-                color,
-                Kind::Unspecified,
-            ));
-
-            // Center label within button.
-            let lx = r.loc.x as f64 + (r.size.w as f64 - btn.label_size.0 as f64) / 2.0;
-            let ly = r.loc.y as f64 + (r.size.h as f64 - btn.label_size.1 as f64) / 2.0;
-            let label_loc = Point::<f64, Logical>::from((lx, ly)).to_physical(s);
             if let Ok(elem) = MemoryRenderBufferRenderElement::from_buffer(
                 renderer,
-                label_loc,
+                loc,
                 &btn.label_buf,
+                None,
+                None,
+                None,
+                Kind::Unspecified,
+            ) {
+                labels.push(elem);
+            }
+        }
+
+        // Center title.
+        if self.title_size.0 > 0 {
+            let title_x = (output_size.w as f64 - self.title_size.0 as f64) / 2.0;
+            let title_y = (BAR_HEIGHT as f64 - self.title_size.1 as f64) / 2.0;
+            let loc = Point::<f64, Logical>::from((title_x, title_y)).to_physical(s);
+
+            if let Ok(elem) = MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                loc,
+                &self.title_buf,
                 None,
                 None,
                 None,
@@ -252,15 +313,15 @@ impl WorkspaceBar {
     }
 }
 
-/// Render a button label into a MemoryRenderBuffer. Returns (w, h) in logical pixels.
-fn render_button_label(
-    buf: &mut MemoryRenderBuffer,
-    text: &str,
-    bg: [u8; 4],
+/// Shape text with cosmic_text and measure its bounding box.
+/// Returns (configured buffer, text_width, text_height) in logical pixels.
+fn shape_and_measure(
     font_system: &mut FontSystem,
-    swash_cache: &mut SwashCache,
-) -> (i32, i32) {
-    let metrics = Metrics::new(FONT_SIZE, LINE_HEIGHT);
+    text: &str,
+    font_size: f32,
+    line_height: f32,
+) -> (CtBuffer, i32, i32) {
+    let metrics = Metrics::new(font_size, line_height);
     let mut ct_buffer = CtBuffer::new(font_system, metrics);
     ct_buffer.set_size(font_system, Some(f32::INFINITY), Some(f32::INFINITY));
     ct_buffer.set_text(
@@ -272,66 +333,201 @@ fn render_button_label(
     );
     ct_buffer.shape_until_scroll(font_system, false);
 
-    let mut max_w = 0.0f32;
-    let mut max_bottom = 0.0f32;
+    let mut text_w = 0.0f32;
+    let mut text_h = 0.0f32;
     for run in ct_buffer.layout_runs() {
-        max_w = max_w.max(run.line_w);
-        max_bottom = max_bottom.max(run.line_top + run.line_height);
+        text_w = text_w.max(run.line_w);
+        text_h = text_h.max(run.line_top + run.line_height);
     }
+    (ct_buffer, text_w.ceil() as i32, text_h.ceil() as i32)
+}
 
-    let inner_w = max_w.ceil() as i32;
-    let inner_h = max_bottom.ceil() as i32;
-    let buf_w = (inner_w + LABEL_PAD * 2).max(1);
-    let buf_h = (inner_h + LABEL_PAD * 2).max(1);
+/// Render a workspace button into a MemoryRenderBuffer.
+/// Active: rounded pill background + dark text.
+/// Inactive: transparent background + gray text.
+/// Returns (w, h) in logical pixels.
+fn render_pill_button(
+    buf: &mut MemoryRenderBuffer,
+    text: &str,
+    active: bool,
+    font_system: &mut FontSystem,
+    swash_cache: &mut SwashCache,
+) -> (i32, i32) {
+    let (mut ct_buffer, text_w, text_h) =
+        shape_and_measure(font_system, text, FONT_SIZE, LINE_HEIGHT);
+
+    let buf_h = PILL_H;
+    let text_offset_y = (PILL_H - text_h) / 2;
+    let (buf_w, text_offset_x) = if active {
+        ((text_w + PILL_PAD_H * 2).max(1), PILL_PAD_H)
+    } else {
+        ((text_w + INACTIVE_PAD_H * 2).max(1), INACTIVE_PAD_H)
+    };
+
+    let fg = if active { ACTIVE_FG } else { INACTIVE_FG };
 
     let mut ctx = buf.render();
     ctx.resize((buf_w, buf_h));
     ctx.draw(|data| {
-        // Fill with button background color.
-        data.chunks_exact_mut(4)
-            .for_each(|c| c.copy_from_slice(&bg));
+        data.fill(0);
+        if active {
+            draw_rounded_rect(data, buf_w, buf_h, PILL_RADIUS, &PILL_BG);
+        }
 
-        let ct_color = CtColor::rgba(LABEL_FG[2], LABEL_FG[1], LABEL_FG[0], 255);
-        ct_buffer.draw(
+        draw_text_onto(
+            data,
+            buf_w,
+            buf_h,
+            text_offset_x,
+            text_offset_y,
+            &fg,
+            &mut ct_buffer,
             font_system,
             swash_cache,
-            ct_color,
-            |gx, gy, gw, gh, color| {
-                let alpha = color.a() as u32;
-                if alpha == 0 {
-                    return;
-                }
-                let px_r = color.r() as u32;
-                let px_g = color.g() as u32;
-                let px_b = color.b() as u32;
-
-                for dy in 0..gh as i32 {
-                    for dx in 0..gw as i32 {
-                        let x = gx + dx + LABEL_PAD;
-                        let y = gy + dy + LABEL_PAD;
-                        if x < 0 || x >= buf_w || y < 0 || y >= buf_h {
-                            continue;
-                        }
-                        let stride = buf_w * 4;
-                        let off = (y * stride + x * 4) as usize;
-                        let inv = 255 - alpha;
-                        let db = data[off] as u32;
-                        let dg = data[off + 1] as u32;
-                        let dr = data[off + 2] as u32;
-                        data[off] = ((db * inv + px_b * alpha) / 255) as u8;
-                        data[off + 1] = ((dg * inv + px_g * alpha) / 255) as u8;
-                        data[off + 2] = ((dr * inv + px_r * alpha) / 255) as u8;
-                        data[off + 3] = 255;
-                    }
-                }
-            },
         );
 
         Ok::<_, std::convert::Infallible>(vec![Rectangle::from_size(Size::<i32, SBuffer>::from((
             buf_w, buf_h,
         )))])
     })
-    .unwrap();
+    .expect("MemoryRenderBuffer draw with Infallible error type");
 
     (buf_w, buf_h)
+}
+
+/// Render a plain text label (no background) into a MemoryRenderBuffer.
+/// Returns (w, h) in logical pixels.
+fn render_text_label(
+    buf: &mut MemoryRenderBuffer,
+    text: &str,
+    fg: &[u8; 4],
+    font_size: f32,
+    line_height: f32,
+    font_system: &mut FontSystem,
+    swash_cache: &mut SwashCache,
+) -> (i32, i32) {
+    let (mut ct_buffer, text_w, text_h) =
+        shape_and_measure(font_system, text, font_size, line_height);
+
+    let buf_w = (text_w + TEXT_LABEL_PAD * 2).max(1);
+    let buf_h = (text_h + TEXT_LABEL_PAD * 2).max(1);
+
+    let mut ctx = buf.render();
+    ctx.resize((buf_w, buf_h));
+    ctx.draw(|data| {
+        data.fill(0);
+        draw_text_onto(
+            data,
+            buf_w,
+            buf_h,
+            TEXT_LABEL_PAD,
+            TEXT_LABEL_PAD,
+            fg,
+            &mut ct_buffer,
+            font_system,
+            swash_cache,
+        );
+
+        Ok::<_, std::convert::Infallible>(vec![Rectangle::from_size(Size::<i32, SBuffer>::from((
+            buf_w, buf_h,
+        )))])
+    })
+    .expect("MemoryRenderBuffer draw with Infallible error type");
+
+    (buf_w, buf_h)
+}
+
+/// Alpha-blend text glyphs onto existing pixel data.
+#[allow(clippy::too_many_arguments)] // cosmic_text requires font_system + swash_cache as separate &mut refs
+fn draw_text_onto(
+    data: &mut [u8],
+    buf_w: i32,
+    buf_h: i32,
+    offset_x: i32,
+    offset_y: i32,
+    fg: &[u8; 4],
+    ct_buffer: &mut CtBuffer,
+    font_system: &mut FontSystem,
+    swash_cache: &mut SwashCache,
+) {
+    let stride = buf_w * 4;
+    let ct_color = CtColor::rgba(fg[2], fg[1], fg[0], fg[3]);
+    ct_buffer.draw(
+        font_system,
+        swash_cache,
+        ct_color,
+        |gx, gy, gw, gh, color| {
+            let alpha = color.a() as u32;
+            if alpha == 0 {
+                return;
+            }
+            let px_r = color.r() as u32;
+            let px_g = color.g() as u32;
+            let px_b = color.b() as u32;
+
+            for dy in 0..gh as i32 {
+                for dx in 0..gw as i32 {
+                    let x = gx + dx + offset_x;
+                    let y = gy + dy + offset_y;
+                    if x < 0 || x >= buf_w || y < 0 || y >= buf_h {
+                        continue;
+                    }
+                    let off = (y * stride + x * 4) as usize;
+                    if off + 3 >= data.len() {
+                        continue;
+                    }
+                    let inv = 255 - alpha;
+                    let db = data[off] as u32;
+                    let dg = data[off + 1] as u32;
+                    let dr = data[off + 2] as u32;
+                    let da = data[off + 3] as u32;
+                    data[off] = ((db * inv + px_b * alpha) / 255) as u8;
+                    data[off + 1] = ((dg * inv + px_g * alpha) / 255) as u8;
+                    data[off + 2] = ((dr * inv + px_r * alpha) / 255) as u8;
+                    data[off + 3] = ((da * inv + 255 * alpha) / 255).min(255) as u8;
+                }
+            }
+        },
+    );
+}
+
+/// Draw a filled rounded rectangle with anti-aliased edges into BGRA pixel data.
+fn draw_rounded_rect(data: &mut [u8], w: i32, h: i32, radius: f32, color: &[u8; 4]) {
+    let stride = w * 4;
+
+    for py in 0..h {
+        for px in 0..w {
+            let coverage = rounded_rect_coverage(px as f32, py as f32, w as f32, h as f32, radius);
+            if coverage <= 0.0 {
+                continue;
+            }
+            let off = (py * stride + px * 4) as usize;
+            if coverage >= 1.0 {
+                data[off] = color[0];
+                data[off + 1] = color[1];
+                data[off + 2] = color[2];
+                data[off + 3] = color[3];
+            } else {
+                // Straight alpha: scale only alpha by coverage, keep RGB intact.
+                data[off] = color[0];
+                data[off + 1] = color[1];
+                data[off + 2] = color[2];
+                data[off + 3] = (color[3] as f32 * coverage) as u8;
+            }
+        }
+    }
+}
+
+/// Compute pixel coverage for a rounded rectangle using SDF. Returns 0.0..1.0.
+fn rounded_rect_coverage(px: f32, py: f32, w: f32, h: f32, r: f32) -> f32 {
+    let cx = px + 0.5;
+    let cy = py + 0.5;
+    let hw = w / 2.0;
+    let hh = h / 2.0;
+    let dx = (cx - hw).abs() - (hw - r);
+    let dy = (cy - hh).abs() - (hh - r);
+    let outside_dist = (dx.max(0.0) * dx.max(0.0) + dy.max(0.0) * dy.max(0.0)).sqrt();
+    let inside_dist = dx.max(dy).min(0.0);
+    let dist = outside_dist + inside_dist - r;
+    (0.5 - dist).clamp(0.0, 1.0)
 }

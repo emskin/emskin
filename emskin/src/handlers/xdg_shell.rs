@@ -253,13 +253,27 @@ impl XdgShellHandler for EmskinState {
         let title =
             Self::get_toplevel_data(&surface, |d| d.lock().ok().and_then(|d| d.title.clone()));
         if self.is_emacs_surface(&surface) {
-            // Active workspace Emacs — forward title to host window.
+            // Active workspace Emacs — forward title to host window + update bar name.
             if let Some(title) = title {
                 tracing::debug!("Emacs title changed: {title}");
+                self.active_workspace_name = extract_bar_name(&title);
                 self.emacs_title = Some(title);
             }
         } else if self.is_any_emacs_surface(surface.wl_surface()) {
-            // Inactive workspace Emacs frame — ignore (don't set host title).
+            // Inactive workspace Emacs frame — update its workspace name.
+            if let Some(title) = &title {
+                let short = extract_bar_name(title);
+                for ws in self.inactive_workspaces.values_mut() {
+                    if ws
+                        .emacs_surface
+                        .as_ref()
+                        .is_some_and(|s| s == surface.wl_surface())
+                    {
+                        ws.name = short;
+                        break;
+                    }
+                }
+            }
         } else if let Some(window_id) = self.apps.id_for_surface(surface.wl_surface()) {
             if let Some(title) = title {
                 self.ipc
@@ -279,6 +293,16 @@ impl XdgShellHandler for EmskinState {
         }
         // Inactive workspace Emacs or other surfaces: ignore app_id changes.
     }
+}
+
+/// Extract a short display name from an Emacs frame title for the workspace bar.
+/// Strips " - GNU Emacs ..." suffix and "*eaf: " prefix.
+/// e.g. "*eaf: firefox* - GNU Emacs at home" → "firefox*"
+///      "*scratch* - GNU Emacs at home" → "*scratch*"
+fn extract_bar_name(title: &str) -> String {
+    let base = title.split(" - GNU Emacs").next().unwrap_or(title).trim();
+    let base = base.strip_prefix("*eaf: ").unwrap_or(base);
+    base.to_string()
 }
 
 // Xdg Shell

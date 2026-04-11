@@ -57,6 +57,8 @@ pub struct Workspace {
     pub space: Space<Window>,
     pub emacs_surface: Option<WlSurface>,
     pub emacs_x11_window: Option<Window>,
+    /// Display name for the bar (extracted from Emacs frame title).
+    pub name: String,
 }
 
 pub struct EmskinState {
@@ -74,6 +76,8 @@ pub struct EmskinState {
     pub inactive_workspaces: HashMap<u64, Workspace>,
     /// The id of the currently active workspace.
     pub active_workspace_id: u64,
+    /// Display name of the active workspace (from Emacs frame title).
+    pub active_workspace_name: String,
     /// Next workspace id to allocate.
     pub next_workspace_id: u64,
     /// Emacs toplevels awaiting parent() check (child frame detection).
@@ -251,6 +255,7 @@ impl EmskinState {
             space,
             inactive_workspaces: HashMap::new(),
             active_workspace_id: 1,
+            active_workspace_name: String::new(),
             next_workspace_id: 2,
             pending_emacs_toplevels: Vec::new(),
             workspace_protocol,
@@ -475,18 +480,21 @@ impl EmskinState {
         let old_space = std::mem::take(&mut self.space);
         let old_emacs = self.emacs_surface.take();
         let old_x11 = self.emacs_x11_window.take();
+        let old_name = std::mem::take(&mut self.active_workspace_name);
         self.inactive_workspaces.insert(
             self.active_workspace_id,
             Workspace {
                 space: old_space,
                 emacs_surface: old_emacs,
                 emacs_x11_window: old_x11,
+                name: old_name,
             },
         );
 
         self.space = target.space;
         self.emacs_surface = target.emacs_surface.take();
         self.emacs_x11_window = target.emacs_x11_window.take();
+        self.active_workspace_name = target.name;
         self.active_workspace_id = target_id;
 
         // App migration is handled by IPC set_geometry from Emacs (sync-all).

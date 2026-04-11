@@ -167,6 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         space: new_space,
                         emacs_surface: Some(emacs_wl),
                         emacs_x11_window: None,
+                        name: String::new(),
                     },
                 );
 
@@ -264,12 +265,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // --- Workspace: refresh ext-workspace-v1 protocol + bar ---
         {
             let ws_ids = state.all_workspace_ids();
-            let ws_infos: Vec<crate::protocols::workspace::WorkspaceInfo> = ws_ids
+
+            // Build (id, &name) pairs — borrow from state, no cloning.
+            let ws_named: Vec<(u64, &str)> = ws_ids
                 .iter()
-                .map(|&id| crate::protocols::workspace::WorkspaceInfo {
-                    id,
-                    name: format!("Workspace {id}"),
-                    active: id == state.active_workspace_id,
+                .map(|&id| {
+                    let name: &str = if id == state.active_workspace_id {
+                        &state.active_workspace_name
+                    } else {
+                        state
+                            .inactive_workspaces
+                            .get(&id)
+                            .map(|ws| ws.name.as_str())
+                            .unwrap_or("")
+                    };
+                    (id, name)
+                })
+                .collect();
+
+            let ws_infos: Vec<crate::protocols::workspace::WorkspaceInfo> = ws_named
+                .iter()
+                .map(|&(id, name)| {
+                    let display_name = if name.is_empty() {
+                        format!("Workspace {id}")
+                    } else {
+                        name.to_string()
+                    };
+                    crate::protocols::workspace::WorkspaceInfo {
+                        id,
+                        name: display_name,
+                        active: id == state.active_workspace_id,
+                    }
                 })
                 .collect();
             if let Some(output) = state.space.outputs().next().cloned() {
@@ -281,7 +307,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if state.bar_enabled {
                 state
                     .workspace_bar
-                    .update(&ws_ids, state.active_workspace_id);
+                    .update(&ws_named, state.active_workspace_id);
             }
         }
 
