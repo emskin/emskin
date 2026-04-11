@@ -256,16 +256,20 @@ VIEW-ID 0 means the source window; otherwise look up the mirror alist."
             (buffer-list)))
 
 (defun emskin--on-window-destroyed (window-id)
-  "Close the Emacs window/buffer for WINDOW-ID and restore focus."
+  "Close all Emacs windows/buffer for WINDOW-ID and restore focus."
   (when-let ((buf (emskin--find-buffer window-id)))
     ;; Clear window-id first to prevent kill-buffer-hook from sending
     ;; a redundant "close" message back to the compositor.
     (with-current-buffer buf
       (setq-local emskin--window-id nil))
-    (let ((win (get-buffer-window buf t)))
-      (when (and win (cdr (window-list nil 'no-minibuf)))
-        (delete-window win))
-      (kill-buffer buf))
+    ;; Delete ALL windows showing this buffer (source + mirrors).
+    ;; Walk in reverse so deletion doesn't invalidate the list.
+    (dolist (win (reverse (get-buffer-window-list buf nil t)))
+      (when (cdr (window-list (window-frame win) 'no-minibuf))
+        (delete-window win)))
+    (kill-buffer buf)
+    ;; Clean up mirror-table entry.
+    (remhash window-id emskin--mirror-table)
     ;; After window/buffer removal, check if the now-selected buffer is
     ;; an emskin app and send set_focus so the compositor matches.
     (let ((next-wid (buffer-local-value 'emskin--window-id
