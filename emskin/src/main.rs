@@ -2,6 +2,7 @@ pub mod apps;
 mod clipboard;
 mod clipboard_x11;
 mod crosshair;
+mod cursor_x11;
 mod handlers;
 mod input;
 pub mod ipc;
@@ -596,14 +597,17 @@ fn start_xwayland(
                         for (target, mimes) in pairs {
                             if !mimes.is_empty() {
                                 if let Some(ref mut xwm) = state.xwm {
-                                    if let Err(e) =
-                                        xwm.new_selection(target, Some(mimes.clone()))
-                                    {
+                                    if let Err(e) = xwm.new_selection(target, Some(mimes.clone())) {
                                         tracing::warn!("X11 replay {target:?} failed: {e}");
                                     }
                                 }
                             }
                         }
+                    }
+
+                    // Initialize X11 cursor tracker for XWayland cursor forwarding.
+                    if let Some(tracker) = cursor_x11::X11CursorTracker::new(display_number) {
+                        state.x11_cursor_tracker = Some(tracker);
                     }
 
                     // Spawn child now that both WAYLAND_DISPLAY and DISPLAY are set.

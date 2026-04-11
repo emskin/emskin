@@ -398,6 +398,15 @@ fn post_render(state: &mut EmskinState, output: &Output) {
             }
         }
     }
+    // Poll X11 cursor changes (emacs-gtk via XWayland).
+    if let Some(ref mut tracker) = state.x11_cursor_tracker {
+        tracker.dispatch();
+        if let Some(icon) = tracker.take_pending() {
+            state.cursor_status = smithay::input::pointer::CursorImageStatus::Named(icon);
+            state.cursor_changed = true;
+        }
+    }
+
     if let Err(e) = state.display_handle.flush_clients() {
         tracing::warn!("flush_clients failed: {}", e);
     }

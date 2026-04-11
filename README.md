@@ -22,12 +22,12 @@ emskin 是一个嵌套 Wayland 合成器：在一个 winit 窗口内运行独立
 - **中文/日文/韩文输入法** — 纯 Wayland 客户端（Chrome）通过 text_input_v3 桥接宿主 IME；GTK/Qt 客户端（Firefox）通过 fcitx5-gtk 直连，两条路径自动切换互不干扰
 - **主机剪贴板双向同步** — pgtk Emacs 通过 Wayland data_device，GTK3 Emacs 通过 XWayland selection 桥接，两条路径自动路由
 - **GPU 缓冲区共享** — linux-dmabuf 协议支持硬件加速客户端
-- **光标形状跟随** — 嵌入程序的光标形状自动转发到宿主窗口（链接显示手指、文本框显示 I-beam 等），通过 wp_cursor_shape_v1 协议
+- **光标形状跟随** — 嵌入程序的光标形状自动转发到宿主窗口（链接显示手指、文本框显示 I-beam 等）。Wayland 客户端通过 wp_cursor_shape_v1，X11 客户端通过 XFixes cursor 追踪
 - **Popup 支持**（右键菜单、下拉框、补全浮层等）
 - **xdg_activation_v1 焦点转移**（启动新应用时自动获取焦点）
 - **通过 CLI 参数指定键盘布局**（`--xkb-layout` 等）
 
-> **推荐使用 pgtk (pure GTK) 版本的 Emacs**（`--with-pgtk` 编译），体验最佳。GTK3 X11 版本通过 XWayland 支持，包括全屏、嵌入应用、剪贴板同步等核心功能，但窗口几何计算可能有偏差。
+> **推荐使用 pgtk (pure GTK) 版本的 Emacs**（`--with-pgtk` 编译），体验最佳。GTK3 X11 版本通过 XWayland 支持，包括全屏、嵌入应用、剪贴板同步、光标形状跟随等核心功能，但窗口几何计算可能有偏差。
 
 ## 依赖
 

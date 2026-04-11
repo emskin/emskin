@@ -61,6 +61,8 @@
 - X11 clipboard routing: `SelectionOrigin` enum (Wayland/X11) tracks where the active selection came from. `forward_client_selection` routes host paste requests to the correct source — `request_data_device_client_selection` for Wayland, `X11Wm::send_selection` for X11. Must reset origin on `cleared_selection` and `SourceCancelled`
 - X11 clipboard injection: `inject_host_selection` must call `X11Wm::new_selection()` alongside `set_data_device_selection` so X11 clients can paste host content. Cache `host_clipboard_mimes`/`host_primary_mimes` and replay into XWM on ready (initial `HostSelectionChanged` fires before XWM exists)
 - Clipboard startup guard: use `!self.ipc.is_connected()` instead of per-target bool flags — GTK clipboard init happens before emskin.el connects, real user copies happen after. Works for both pgtk (SelectionHandler) and gtk3 (XwmHandler) paths
+- X11 cursor tracking: `cursor_x11.rs` opens an independent X11 connection (explicit `:{display}`, NOT `DISPLAY` env var) to XWayland, subscribes to XFixes `CursorNotifyMask::DISPLAY_CURSOR` on root window, maps cursor name atoms to `CursorIcon` via `get_atom_name`. Dispatched in `post_render` via `poll_for_event` (non-blocking). `broken` flag stops polling after connection error. Requires XFixes v2+
+- X11 cursor: `SeatHandler::cursor_image` is NEVER called for X11 clients — XWayland doesn't forward X11 cursor changes via `wl_pointer.set_cursor`. Must use XFixes cursor tracking instead
 
 ## Wayland Protocols Implemented
 - xdg_shell (toplevel, popup)

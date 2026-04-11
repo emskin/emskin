@@ -86,6 +86,7 @@ pub struct EmskinState {
     // XWayland
     pub xwm: Option<X11Wm>,
     pub xdisplay: Option<u32>,
+    pub x11_cursor_tracker: Option<crate::cursor_x11::X11CursorTracker>,
 
     pub seat: Seat<Self>,
 
@@ -244,6 +245,7 @@ impl EmskinState {
             popups,
             xwm: None,
             xdisplay: None,
+            x11_cursor_tracker: None,
             seat,
 
             // emskin specific
