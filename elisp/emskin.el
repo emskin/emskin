@@ -214,11 +214,11 @@ VIEW-ID 0 means the source window; otherwise look up the mirror alist."
 
 (defun emskin--on-window-created (window-id title)
   "Create/display a buffer for the new embedded app and send initial geometry."
-  (let* ((buf-name (format "*eaf: %s*" (if (string-empty-p title) "app" title)))
+  (let* ((buf-name (format "*emskin: %s*" (if (string-empty-p title) "app" title)))
          (buf (get-buffer-create buf-name)))
     (with-current-buffer buf
       (setq-local emskin--window-id window-id)
-      (setq-local mode-name "EAF")
+      (setq-local mode-name "emskin")
       (setq-local buffer-read-only t)
       (setq-local left-fringe-width 0)
       (setq-local right-fringe-width 0)
@@ -254,7 +254,7 @@ VIEW-ID 0 means the source window; otherwise look up the mirror alist."
   "Rename the EAF buffer when the app title changes."
   (when-let ((buf (emskin--find-buffer window-id)))
     (with-current-buffer buf
-      (rename-buffer (format "*eaf: %s*" title) t))))
+      (rename-buffer (format "*emskin: %s*" title) t))))
 
 ;; ---------------------------------------------------------------------------
 ;; Lifecycle: kill-buffer → close
@@ -680,7 +680,7 @@ CALLBACK receives the token string (or nil if unavailable)."
     (emskin--launch-with-token
      (lambda (token)
        (let ((process-environment (emskin--process-env-with-token token)))
-         (start-process (format "eaf-%s" app-name) nil "python3" script)
+         (start-process (format "emskin-%s" app-name) nil "python3" script)
          (message "emskin: launched %s" app-name))))))
 
 (defun emskin-open-native-app (command)
