@@ -650,11 +650,22 @@ fn ipc_set_geometry(state: &mut EmskinState, window_id: u64, x: i32, y: i32, w: 
         if app.geometry.is_none() {
             app.geometry = Some(new_geo);
             let window = app.window.clone();
-            // Always map in active workspace (after migration).
             state.space.map_element(window, new_geo.loc, false);
+            tracing::info!(
+                "app {window_id} mapped immediately at ({},{}) ws={}",
+                new_geo.loc.x,
+                new_geo.loc.y,
+                state.active_workspace_id
+            );
         } else {
             app.pending_geometry = Some(new_geo);
             app.pending_since = Some(std::time::Instant::now());
+            tracing::debug!(
+                "app {window_id} pending geometry ({},{}) ws={}",
+                new_geo.loc.x,
+                new_geo.loc.y,
+                state.active_workspace_id
+            );
         }
     } else if let Some(x11) = app.window.x11_surface() {
         if let Err(e) = x11.configure(new_geo) {
@@ -695,6 +706,10 @@ fn ipc_set_visibility(state: &mut EmskinState, window_id: u64, visible: bool) {
         }
     } else if let Some(geo) = geo {
         state.migrate_app_to_active(window_id);
+        // Write back geometry (migrate resets it to None).
+        if let Some(app) = state.apps.get_mut(window_id) {
+            app.geometry = Some(geo);
+        }
         state.space.map_element(win, geo.loc, false);
     }
 }

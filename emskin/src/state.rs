@@ -401,6 +401,12 @@ impl EmskinState {
         }
         if let Some(app) = self.apps.get_mut(window_id) {
             app.workspace_id = self.active_workspace_id;
+            // Reset geometry so the next set_geometry immediately maps the app
+            // instead of going through the pending path (which would deadlock:
+            // app needs frame callbacks to commit, but it's not in any Space).
+            app.geometry = None;
+            app.pending_geometry = None;
+            app.pending_since = None;
         }
         true
     }
@@ -482,6 +488,10 @@ impl EmskinState {
         self.emacs_surface = target.emacs_surface.take();
         self.emacs_x11_window = target.emacs_x11_window.take();
         self.active_workspace_id = target_id;
+
+        // App migration is handled by IPC set_geometry from Emacs (sync-all).
+        // The compositor does NOT auto-migrate because it doesn't know which
+        // apps are displayed in which Emacs frame.
 
         // Reset state that references the old workspace's surfaces.
         self.prefix_saved_focus = None;

@@ -695,21 +695,37 @@ otherwise focus Emacs.  Skips IPC when focus hasn't changed."
     ;; No pending frame — this is the initial workspace for the current frame.
     (puthash (selected-frame) workspace-id emskin--frame-workspace-table)))
 
+(defun emskin--resync-visible-apps ()
+  "Force re-send geometry for all EAF windows in visible frames.
+Bypasses change detection — used after workspace switch to trigger
+app migration in the compositor."
+  (dolist (fr (frame-list))
+    (when (emskin--frame-visible-p fr)
+      (dolist (win (window-list fr 'no-minibuf))
+        (when-let ((wid (buffer-local-value 'emskin--window-id
+                                            (window-buffer win))))
+          (set-window-scroll-bars win 0 nil 0 nil)
+          (set-window-fringes win 0 0)
+          (set-window-margins win 0 0)
+          (let ((geo (emskin--window-geometry win)))
+            (emskin--send `((type . "set_geometry")
+                           (window_id . ,wid)
+                           (x . ,(nth 0 geo))
+                           (y . ,(nth 1 geo))
+                           (w . ,(nth 2 geo))
+                           (h . ,(nth 3 geo)))))))))
+  ;; Update displayed-table so regular sync-all doesn't double-send.
+  (clrhash emskin--displayed-table))
+
 (defun emskin--on-workspace-switched (workspace-id)
   "Update active workspace tracking and re-sync geometry."
   (setq emskin--active-workspace-id workspace-id)
   ;; Suppress after-focus-change to prevent feedback loop.
   (setq emskin--workspace-switch-suppressed t)
   (run-with-timer 0.3 nil (lambda () (setq emskin--workspace-switch-suppressed nil)))
-  ;; Reset focus guard so sync-focus re-sends set_focus even if the
-  ;; same app was focused before the switch (compositor reset focus
-  ;; to Emacs during switch_workspace).
   (setq emskin--last-focused-wid 'unset)
-  ;; Sync immediately: workspace_created has already run (IPC order
-  ;; guarantees it), so the frame is registered in the workspace table.
-  (dolist (frame (frame-list))
-    (emskin--sync-all frame))
-  ;; Restore app focus.
+  ;; Force resync — bypass sync-all's change detection.
+  (emskin--resync-visible-apps)
   (emskin--sync-focus (selected-window)))
 
 (defun emskin--on-workspace-destroyed (workspace-id)
@@ -752,9 +768,10 @@ otherwise focus Emacs.  Skips IPC when focus hasn't changed."
   "Clean up workspace mapping when a frame is deleted."
   (remhash frame emskin--frame-workspace-table))
 
-(defun emskin--advise-other-frame (&optional arg &rest _)
-  "Switch compositor workspace BEFORE Emacs tries to focus the other frame.
-Without this, GTK can't focus a window in an inactive workspace."
+(defun emskin--advise-other-frame (orig-fn &optional arg &rest args)
+  "Switch compositor workspace around `other-frame'.
+Sends switch_workspace BEFORE so GTK can focus the target window,
+then runs sync-all AFTER so app migration happens."
   (when emskin--process
     (let* ((n (or arg 1))
            (target (let ((f (selected-frame)))
@@ -764,10 +781,16 @@ Without this, GTK can't focus a window in an inactive workspace."
            (ws-id (gethash target emskin--frame-workspace-table)))
       (when (and ws-id (not (eql ws-id emskin--active-workspace-id)))
         (emskin--send `((type . "switch_workspace")
-                        (workspace_id . ,ws-id)))
-        (setq emskin--active-workspace-id ws-id)))))
+                        (workspace_id . ,ws-id))))))
+  ;; Run the actual other-frame.
+  (apply orig-fn arg args)
+  ;; After frame switch: force resync so apps migrate to the new workspace.
+  (when emskin--process
+    (setq emskin--last-focused-wid 'unset)
+    (emskin--resync-visible-apps)
+    (emskin--sync-focus (selected-window))))
 
-(advice-add 'other-frame :before #'emskin--advise-other-frame)
+(advice-add 'other-frame :around #'emskin--advise-other-frame)
 
 (add-hook 'after-make-frame-functions #'emskin--after-make-frame)
 (add-function :after after-focus-change-function #'emskin--after-focus-change)
