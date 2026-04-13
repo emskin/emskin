@@ -135,8 +135,11 @@ jobs:
       - name: Generate .SRCINFO
         run: |
           useradd -m builder
-          chown builder:builder PKGBUILD
-          su builder -c 'makepkg --printsrcinfo' > .SRCINFO
+          cp PKGBUILD /home/builder/
+          cd /home/builder
+          su builder -c 'makepkg --printsrcinfo' > /home/builder/.SRCINFO
+          cp /home/builder/.SRCINFO "$GITHUB_WORKSPACE/"
+          cp PKGBUILD "$GITHUB_WORKSPACE/"
 
       - name: Push to AUR
         env:
