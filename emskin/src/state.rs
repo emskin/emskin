@@ -200,6 +200,10 @@ pub struct EmskinState {
     /// Set when cursor_status changes; consumed by apply_pending_state.
     pub cursor_changed: bool,
 
+    /// Saved keyboard focus before a layer surface (launcher/overlay) took it.
+    /// Restored when the layer surface is destroyed.
+    pub layer_saved_focus: Option<WlSurface>,
+
     /// Coarse damage flag for structural events (IPC, layer shell, input,
     /// workspace switch) that smithay's per-element OutputDamageTracker does
     /// not cover.  When true the next Redraw calls render_frame; cleared after.
@@ -319,6 +323,7 @@ impl EmskinState {
             pending_ime_allowed: None,
             cursor_status: CursorImageStatus::default_named(),
             cursor_changed: false,
+            layer_saved_focus: None,
             needs_redraw: true,
         })
     }
@@ -513,6 +518,7 @@ impl EmskinState {
 
         // Reset state that references the old workspace's surfaces.
         self.prefix_saved_focus = None;
+        self.layer_saved_focus = None;
         self.text_input_focus = None;
         self.pending_ime_allowed = Some(false);
         self.skeleton.clear();
