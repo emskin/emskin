@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check / Clippy / Fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libudev-dev \
+            libinput-dev \
+            libgbm-dev \
+            libseat-dev \
+            libpixman-1-dev \
+            libssl-dev \
+            libx11-xcb-dev \
+            libxcb1-dev \
+            libxcb-composite0-dev \
+            libxcb-xfixes0-dev \
+            libxcb-xinput-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-dri3-dev \
+            libxcb-present-dev \
+            libxcb-sync-dev \
+            libxcb-randr0-dev \
+            libxcb-shm0-dev \
+            libxcb-xkb-dev \
+            libxcb-dpms0-dev \
+            libxcb-res0-dev \
+            libxcb-cursor-dev \
+            libxcb-icccm4-dev \
+            libxkbcommon-x11-dev \
+            libfontconfig1-dev \
+            libfreetype-dev
+
+      - name: Install Rust toolchain (from emskin/rust-toolchain.toml)
+        working-directory: emskin
+        run: rustup show
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            emskin/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('emskin/Cargo.lock', 'emskin/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Fmt
+        working-directory: emskin
+        run: cargo fmt --check
+
+      - name: Clippy
+        working-directory: emskin
+        run: cargo clippy -- -D warnings
+
+      - name: Build
+        working-directory: emskin
+        run: cargo build
