@@ -8,7 +8,9 @@
 
 emskin 把 Emacs 放进一个 Wayland 合成器里，让**任意程序**（浏览器、终端、视频播放器等）都能像原生 buffer 一样嵌入 Emacs 窗口。
 
-![demo](screenshots/demo.gif)
+<p align="center">
+  <video src="images/demo.mp4" controls muted loop playsinline width="720"></video>
+</p>
 
 ## 特性
 
@@ -81,9 +83,16 @@ M-x emskin-open-native-app RET foot
 
 ### 使用启动器
 
-绑定快捷键启动 rofi 等启动器：
+绑定快捷键启动 zofi / rofi 等启动器：
 
 ```elisp
+;; zofi — 专为 emskin 设计的启动器，见 https://github.com/emskin/zskins
+(defun my/emskin-zofi ()
+  (interactive)
+  (start-process "zofi" nil "setsid" "zofi"))
+(global-set-key (kbd "C-c z") #'my/emskin-zofi)
+
+;; rofi
 (defun my/emskin-rofi ()
   (interactive)
   (start-process "rofi" nil
