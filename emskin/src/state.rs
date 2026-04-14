@@ -209,7 +209,6 @@ pub struct EmskinState {
     /// downstream surface never sees an unpaired release.
     pub skeleton_click_absorbed: bool,
 
-
     /// Current cursor image status. For Named, the host cursor is used;
     /// for Surface (GTK3/Emacs), the cursor is software-rendered each frame.
     pub cursor_status: CursorImageStatus,
@@ -540,6 +539,16 @@ impl EmskinState {
             self.cursor_status = CursorImageStatus::default_named();
             self.cursor_changed = true;
         }
+
+        // Notify Emacs BEFORE changing keyboard focus. IPC is flushed
+        // immediately (same syscall), while wl_keyboard.enter is buffered
+        // until the next flush_clients(). This ensures Emacs updates
+        // active-workspace-id before GTK's focus-change hooks fire,
+        // preventing stale sync-all from sending wrong visibility/geometry.
+        self.ipc
+            .send(crate::ipc::OutgoingMessage::WorkspaceSwitched {
+                workspace_id: target_id,
+            });
 
         // Reset keyboard and pointer focus to the new workspace's Emacs.
         let serial = smithay::utils::SERIAL_COUNTER.next_serial();

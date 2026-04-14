@@ -40,8 +40,15 @@ impl EmskinState {
                     },
                 );
 
-                if is_prefix && self.focus.prefix_saved_focus.is_none() {
-                    self.focus.prefix_saved_focus = Some(keyboard.current_focus());
+                if is_prefix {
+                    // Save original focus only once per prefix sequence.
+                    // If prefix_saved_focus is already set (stale from a
+                    // previous sequence whose prefix_done was lost), we
+                    // still redirect to Emacs — otherwise the user gets
+                    // stuck unable to use any prefix key.
+                    if self.focus.prefix_saved_focus.is_none() {
+                        self.focus.prefix_saved_focus = Some(keyboard.current_focus());
+                    }
                     if let Some(emacs) = self.emacs_surface.clone() {
                         if keyboard.current_focus().as_ref() != Some(&emacs) {
                             keyboard.set_focus(self, Some(emacs), SERIAL_COUNTER.next_serial());
@@ -128,18 +135,20 @@ impl EmskinState {
                                 "skeleton label click: kind={} label={:?} ({},{}) {}x{}",
                                 rect.kind,
                                 rect.label,
-                                rect.x,
-                                rect.y,
-                                rect.w,
-                                rect.h,
+                                rect.rect.x,
+                                rect.rect.y,
+                                rect.rect.w,
+                                rect.rect.h,
                             );
                             self.ipc.send(crate::ipc::OutgoingMessage::SkeletonClicked {
                                 kind: rect.kind,
                                 label: rect.label,
-                                x: rect.x,
-                                y: rect.y,
-                                w: rect.w,
-                                h: rect.h,
+                                rect: crate::ipc::IpcRect {
+                                    x: rect.rect.x,
+                                    y: rect.rect.y,
+                                    w: rect.rect.w,
+                                    h: rect.rect.h,
+                                },
                             });
                             self.skeleton_click_absorbed = true;
                             return;

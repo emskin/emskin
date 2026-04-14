@@ -61,8 +61,6 @@ Computed once from compositor-reported surface height.")
 (defvar-local emskin--visible nil
   "Whether this EAF buffer is currently displayed in an Emacs window.")
 
-(defvar emskin--displayed-table (make-hash-table :test 'eql)
-  "Reusable hash-table for `emskin--sync-all' to avoid per-call allocation.")
 
 ;; Mirror tracking: window-id → (source-emacs-window . mirror-alist)
 ;; mirror-alist: ((emacs-window-id . view-id) ...)
@@ -187,9 +185,9 @@ Coerces buffer to unibyte so aref always yields raw byte values 0-255."
         (setq emskin--header-offset offset)
         (message "emskin: surface=%sx%s bars=%dpx"
                  (gethash "width" msg) h offset)
-        ;; Re-sync all EAF windows now that we have the correct offset.
+        ;; Re-sync EAF windows now that we have the correct offset.
         (dolist (frame (frame-list))
-          (emskin--sync-all frame))))
+          (emskin--sync-frame frame))))
      ((string= type "skeleton_clicked")
       (let ((kind (gethash "kind" msg ""))
             (label (gethash "label" msg ""))
@@ -242,8 +240,10 @@ VIEW-ID 0 means the source window; otherwise look up the mirror alist."
       (setq-local cursor-type nil)
       (add-hook 'kill-buffer-hook #'emskin--kill-buffer-hook nil t)
       (add-hook 'post-command-hook #'emskin--post-command-prefix-done nil t))
-    (display-buffer buf '((display-buffer-use-some-window)
-                          (inhibit-same-window . t)))
+    (display-buffer buf '((display-buffer-pop-up-window
+                           display-buffer-use-some-window)
+                          (inhibit-same-window . t)
+                          (reusable-frames . nil)))
     (when-let ((win (get-buffer-window buf t)))
       (set-window-scroll-bars win 0 nil 0 nil)
       (emskin--report-geometry window-id win))
@@ -424,101 +424,87 @@ Covers the body area (excludes fringes, margins, header-line, mode-line)."
                     (w . ,(nth 2 geo))
                     (h . ,(nth 3 geo))))))
 
-(defun emskin--frame-visible-p (frame)
-  "Whether FRAME is currently rendered by the compositor.
-Now: only the active workspace's frame.  Future (side-by-side):
-expand to include all on-screen frames."
-  (or (null emskin--active-workspace-id)      ; before workspace init
-      (eql (gethash frame emskin--frame-workspace-table)
-           emskin--active-workspace-id)))
-
-(defun emskin--sync-all (_frame)
-  "Sync visibility, geometry, and mirrors for all EAF buffers."
-  ;; Pass 1: collect Emacs windows showing each EAF buffer,
-  ;; but ONLY from visible frames (inactive workspace frames are skipped).
-  ;; Key: window-id, Value: list of Emacs windows (in order found).
-  (let ((wid-wins (make-hash-table :test 'eql)))
-    (dolist (fr (frame-list))
-      (when (emskin--frame-visible-p fr)
-        (dolist (win (window-list fr 'no-minibuf))
-          (when-let ((wid (buffer-local-value 'emskin--window-id
-                                              (window-buffer win))))
-            ;; Unconditionally strip scroll-bars, fringes, margins for EAF
-            ;; windows — these are non-persistent across frame/buffer changes.
-            (set-window-scroll-bars win 0 nil 0 nil)
-            (set-window-fringes win 0 0)
-            (set-window-margins win 0 0)
-            (puthash wid (append (gethash wid wid-wins) (list win)) wid-wins)))))
-    ;; Pass 2: for each EAF buffer, sync source + mirrors.
-    (dolist (buf (buffer-list))
-      (when-let ((wid (buffer-local-value 'emskin--window-id buf)))
-        (let* ((wins (gethash wid wid-wins))
-               (now-visible (and wins t))
-               (was-visible (buffer-local-value 'emskin--visible buf))
-               (prev-state (gethash wid emskin--mirror-table))
-               (prev-source (car prev-state))
-               (prev-mirrors (cdr prev-state))) ; ((view-id . emacs-win) ...)
-          ;; Visibility change.
-          (unless (eq now-visible was-visible)
-            (with-current-buffer buf
-              (setq-local emskin--visible now-visible))
-            (emskin--send `((type . "set_visibility")
-                                (window_id . ,wid)
-                                (visible . ,(if now-visible t :json-false)))))
-          (if (not wins)
-              ;; No windows showing this buffer — clean up mirrors.
-              (progn
-                (dolist (m prev-mirrors)
-                  (emskin--send `((type . "remove_mirror")
-                                      (window_id . ,wid)
-                                      (view_id . ,(car m)))))
-                (remhash wid emskin--mirror-table))
-            ;; Determine source window: keep prev-source if still showing,
-            ;; otherwise use first window in the list.
-            (let* ((source-win (if (and prev-source (memq prev-source wins))
-                                   prev-source
-                                 (car wins)))
-                   (mirror-wins (remq source-win wins))
-                   (new-mirrors nil))
-              ;; Source changed — remove all old mirrors and rebuild.
-              (when (and prev-source (not (eq source-win prev-source)))
-                (dolist (m prev-mirrors)
-                  (emskin--send `((type . "remove_mirror")
-                                      (window_id . ,wid)
-                                      (view_id . ,(car m)))))
-                (setq prev-mirrors nil))
-              ;; Sync source geometry.
-              (emskin--report-geometry wid source-win)
-              ;; Reconcile mirrors: reuse existing view-ids where possible.
-              (let ((old-by-win (make-hash-table :test 'eq)))
-                ;; Index old mirrors by Emacs window.
-                (dolist (m prev-mirrors)
-                  (puthash (cdr m) (car m) old-by-win))
-                ;; For each mirror window, reuse or create view-id.
-                (dolist (mw mirror-wins)
-                  (let ((vid (or (gethash mw old-by-win)
-                                 (emskin--alloc-view-id))))
-                    (push (cons vid mw) new-mirrors)
-                    (if (gethash mw old-by-win)
-                        ;; Existing mirror — update geometry.
+(defun emskin--sync-frame (frame)
+  "Sync visibility, geometry, and mirrors for EAF buffers in FRAME.
+Only processes FRAME — never iterates other frames.  Skips the sync
+if FRAME does not belong to the active workspace, which eliminates
+race conditions during workspace switches (stale hooks fire for a
+frame whose workspace-id doesn't match active-workspace-id yet)."
+  (let ((ws-id (gethash frame emskin--frame-workspace-table)))
+    (when (eql ws-id emskin--active-workspace-id)
+    ;; Pass 1: collect Emacs windows showing each EAF buffer in this frame.
+    (let ((wid-wins (make-hash-table :test 'eql)))
+      (dolist (win (window-list frame 'no-minibuf))
+        (when-let ((wid (buffer-local-value 'emskin--window-id
+                                            (window-buffer win))))
+          (set-window-scroll-bars win 0 nil 0 nil)
+          (set-window-fringes win 0 0)
+          (set-window-margins win 0 0)
+          (puthash wid (append (gethash wid wid-wins) (list win)) wid-wins)))
+      ;; Pass 2: for each EAF buffer, sync source + mirrors.
+      (dolist (buf (buffer-list))
+        (when-let ((wid (buffer-local-value 'emskin--window-id buf)))
+          (let* ((wins (gethash wid wid-wins))
+                 (now-visible (and wins t))
+                 (was-visible (buffer-local-value 'emskin--visible buf))
+                 (prev-state (gethash wid emskin--mirror-table))
+                 (prev-source (car prev-state))
+                 (prev-mirrors (cdr prev-state)))
+            ;; Visibility change.
+            (unless (eq now-visible was-visible)
+              (with-current-buffer buf
+                (setq-local emskin--visible now-visible))
+              (emskin--send `((type . "set_visibility")
+                              (window_id . ,wid)
+                              (visible . ,(if now-visible t :json-false)))))
+            (if (not wins)
+                ;; No windows showing this buffer — clean up mirrors.
+                (progn
+                  (dolist (m prev-mirrors)
+                    (emskin--send `((type . "remove_mirror")
+                                    (window_id . ,wid)
+                                    (view_id . ,(car m)))))
+                  (remhash wid emskin--mirror-table))
+              ;; Determine source window: keep prev-source if still showing,
+              ;; otherwise use first window in the list.
+              (let* ((source-win (if (and prev-source (memq prev-source wins))
+                                     prev-source
+                                   (car wins)))
+                     (mirror-wins (remq source-win wins))
+                     (new-mirrors nil))
+                ;; Source changed — remove all old mirrors and rebuild.
+                (when (and prev-source (not (eq source-win prev-source)))
+                  (dolist (m prev-mirrors)
+                    (emskin--send `((type . "remove_mirror")
+                                    (window_id . ,wid)
+                                    (view_id . ,(car m)))))
+                  (setq prev-mirrors nil))
+                ;; Sync source geometry.
+                (emskin--report-geometry wid source-win)
+                ;; Reconcile mirrors.
+                (let ((old-by-win (make-hash-table :test 'eq)))
+                  (dolist (m prev-mirrors)
+                    (puthash (cdr m) (car m) old-by-win))
+                  (dolist (mw mirror-wins)
+                    (let ((vid (or (gethash mw old-by-win)
+                                   (emskin--alloc-view-id))))
+                      (push (cons vid mw) new-mirrors)
+                      (if (gethash mw old-by-win)
+                          (emskin--send-mirror-geometry
+                           wid vid mw "update_mirror_geometry")
                         (emskin--send-mirror-geometry
-                         wid vid mw "update_mirror_geometry")
-                      ;; New mirror — add it.
-                      (emskin--send-mirror-geometry
-                       wid vid mw "add_mirror"))
-                    (remhash mw old-by-win)))
-                ;; Remove mirrors that are no longer displayed.
-                (maphash (lambda (_win vid)
-                           (emskin--send `((type . "remove_mirror")
-                                               (window_id . ,wid)
-                                               (view_id . ,vid))))
-                         old-by-win))
-              ;; Store current state.
-              (puthash wid (cons source-win (nreverse new-mirrors))
-                       emskin--mirror-table))))))))
+                         wid vid mw "add_mirror"))
+                      (remhash mw old-by-win)))
+                  (maphash (lambda (_win vid)
+                             (emskin--send `((type . "remove_mirror")
+                                             (window_id . ,wid)
+                                             (view_id . ,vid))))
+                           old-by-win))
+                (puthash wid (cons source-win (nreverse new-mirrors))
+                         emskin--mirror-table))))))))))
 
-(add-hook 'window-size-change-functions #'emskin--sync-all)
-(add-hook 'window-buffer-change-functions #'emskin--sync-all)
+(add-hook 'window-size-change-functions #'emskin--sync-frame)
+(add-hook 'window-buffer-change-functions #'emskin--sync-frame)
 
 ;; ---------------------------------------------------------------------------
 ;; Skeleton overlay (frame layout inspector)
@@ -695,31 +681,30 @@ otherwise focus Emacs.  Skips IPC when focus hasn't changed."
           (puthash frame workspace-id emskin--frame-workspace-table)
           (message "emskin: frame → workspace %d" workspace-id)
           ;; Sync immediately so scroll-bars are fixed and geometry is sent.
-          (emskin--sync-all frame)))
+          (emskin--sync-frame frame)))
     ;; No pending frame — this is the initial workspace for the current frame.
     (puthash (selected-frame) workspace-id emskin--frame-workspace-table)))
 
-(defun emskin--resync-visible-apps ()
-  "Force re-send geometry for all EAF windows in visible frames.
-Bypasses change detection — used after workspace switch to trigger
-app migration in the compositor."
-  (dolist (fr (frame-list))
-    (when (emskin--frame-visible-p fr)
-      (dolist (win (window-list fr 'no-minibuf))
-        (when-let ((wid (buffer-local-value 'emskin--window-id
-                                            (window-buffer win))))
-          (set-window-scroll-bars win 0 nil 0 nil)
-          (set-window-fringes win 0 0)
-          (set-window-margins win 0 0)
-          (let ((geo (emskin--window-geometry win)))
-            (emskin--send `((type . "set_geometry")
-                           (window_id . ,wid)
-                           (x . ,(nth 0 geo))
-                           (y . ,(nth 1 geo))
-                           (w . ,(nth 2 geo))
-                           (h . ,(nth 3 geo)))))))))
-  ;; Update displayed-table so regular sync-all doesn't double-send.
-  (clrhash emskin--displayed-table))
+(defun emskin--resync-workspace ()
+  "Force full re-sync for the active workspace's frame.
+Clears change detection then delegates to `emskin--sync-frame',
+which handles source/mirror separation correctly."
+  ;; Clear change detection so sync-frame fully re-processes.
+  (dolist (buf (buffer-list))
+    (when (buffer-local-value 'emskin--window-id buf)
+      (with-current-buffer buf
+        (setq-local emskin--last-geometry nil))))
+  (when-let ((fr (emskin--active-frame)))
+    (emskin--sync-frame fr)))
+
+(defun emskin--active-frame ()
+  "Return the Emacs frame for the active workspace, or nil."
+  (let (result)
+    (maphash (lambda (frame ws-id)
+               (when (eql ws-id emskin--active-workspace-id)
+                 (setq result frame)))
+             emskin--frame-workspace-table)
+    result))
 
 (defun emskin--on-workspace-switched (workspace-id)
   "Update active workspace tracking and re-sync geometry."
@@ -729,7 +714,7 @@ app migration in the compositor."
   (run-with-timer 0.3 nil (lambda () (setq emskin--workspace-switch-suppressed nil)))
   (setq emskin--last-focused-wid 'unset)
   ;; Force resync — bypass sync-all's change detection.
-  (emskin--resync-visible-apps)
+  (emskin--resync-workspace)
   (emskin--sync-focus (selected-window)))
 
 (defun emskin--on-workspace-destroyed (workspace-id)
@@ -774,8 +759,10 @@ app migration in the compositor."
 
 (defun emskin--advise-other-frame (orig-fn &optional arg &rest args)
   "Switch compositor workspace around `other-frame'.
-Sends switch_workspace BEFORE so GTK can focus the target window,
-then runs sync-all AFTER so app migration happens."
+Sends switch_workspace BEFORE so GTK can focus the target window.
+Resync is handled by `emskin--on-workspace-switched' when the
+compositor confirms the switch via IPC — NOT here, because
+`active-workspace-id' is still stale at this point."
   (when emskin--process
     (let* ((n (or arg 1))
            (target (let ((f (selected-frame)))
@@ -786,13 +773,7 @@ then runs sync-all AFTER so app migration happens."
       (when (and ws-id (not (eql ws-id emskin--active-workspace-id)))
         (emskin--send `((type . "switch_workspace")
                         (workspace_id . ,ws-id))))))
-  ;; Run the actual other-frame.
-  (apply orig-fn arg args)
-  ;; After frame switch: force resync so apps migrate to the new workspace.
-  (when emskin--process
-    (setq emskin--last-focused-wid 'unset)
-    (emskin--resync-visible-apps)
-    (emskin--sync-focus (selected-window))))
+  (apply orig-fn arg args))
 
 (advice-add 'other-frame :around #'emskin--advise-other-frame)
 

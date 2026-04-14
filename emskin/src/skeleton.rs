@@ -130,10 +130,12 @@ impl Entry {
             rect: SkeletonRect {
                 kind: String::new(),
                 label: String::new(),
-                x: 0,
-                y: 0,
-                w: 0,
-                h: 0,
+                rect: crate::ipc::IpcRect {
+                    x: 0,
+                    y: 0,
+                    w: 0,
+                    h: 0,
+                },
                 selected: false,
             },
             draw_rect: (0, 0, 0, 0),
@@ -225,12 +227,12 @@ impl SkeletonOverlay {
             let text = if rect.label.is_empty() {
                 format!(
                     "{} ({},{}) {}x{}",
-                    rect.kind, rect.x, rect.y, rect.w, rect.h
+                    rect.kind, rect.rect.x, rect.rect.y, rect.rect.w, rect.rect.h
                 )
             } else {
                 format!(
                     "{} {} ({},{}) {}x{}",
-                    rect.kind, rect.label, rect.x, rect.y, rect.w, rect.h
+                    rect.kind, rect.label, rect.rect.x, rect.rect.y, rect.rect.w, rect.rect.h
                 )
             };
             let fg = color_fg_bgra(color_for(&rect.kind, rect.selected));
@@ -267,10 +269,10 @@ impl SkeletonOverlay {
         // those are inset by two. Order matters — elisp sends outer
         // containers first. O(n²) but n ≲ 20 for a debug overlay.
         for i in 0..self.entries.len() {
-            let r_i = self.entries[i].rect.clone();
+            let r_i = self.entries[i].rect.rect;
             let mut depth = 0i32;
             for j in 0..i {
-                let r_j = &self.entries[j].rect;
+                let r_j = self.entries[j].rect.rect;
                 if r_j.x <= r_i.x
                     && r_j.y <= r_i.y
                     && r_j.x + r_j.w >= r_i.x + r_i.w

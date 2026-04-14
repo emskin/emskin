@@ -1,15 +1,22 @@
 use serde::{Deserialize, Serialize};
 
+/// Geometry rectangle from Emacs IPC (logical pixels, Emacs-relative).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub struct IpcRect {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
 /// Emacs → emskin
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IncomingMessage {
     SetGeometry {
         window_id: u64,
-        x: i32,
-        y: i32,
-        w: i32,
-        h: i32,
+        #[serde(flatten)]
+        rect: IpcRect,
     },
     Close {
         window_id: u64,
@@ -23,18 +30,14 @@ pub enum IncomingMessage {
     AddMirror {
         window_id: u64,
         view_id: u64,
-        x: i32,
-        y: i32,
-        w: i32,
-        h: i32,
+        #[serde(flatten)]
+        rect: IpcRect,
     },
     UpdateMirrorGeometry {
         window_id: u64,
         view_id: u64,
-        x: i32,
-        y: i32,
-        w: i32,
-        h: i32,
+        #[serde(flatten)]
+        rect: IpcRect,
     },
     RemoveMirror {
         window_id: u64,
@@ -78,10 +81,8 @@ pub struct SkeletonRect {
     pub kind: String,
     #[serde(default)]
     pub label: String,
-    pub x: i32,
-    pub y: i32,
-    pub w: i32,
-    pub h: i32,
+    #[serde(flatten)]
+    pub rect: IpcRect,
     #[serde(default)]
     pub selected: bool,
 }
@@ -127,10 +128,8 @@ pub enum OutgoingMessage {
     SkeletonClicked {
         kind: String,
         label: String,
-        x: i32,
-        y: i32,
-        w: i32,
-        h: i32,
+        #[serde(flatten)]
+        rect: IpcRect,
     },
     /// A new workspace was created (new Emacs frame detected).
     WorkspaceCreated {
@@ -160,10 +159,12 @@ mod tests {
             msg,
             IncomingMessage::SetGeometry {
                 window_id: 42,
-                x: 10,
-                y: 20,
-                w: 800,
-                h: 600,
+                rect: IpcRect {
+                    x: 10,
+                    y: 20,
+                    w: 800,
+                    h: 600,
+                },
             }
         ));
     }
@@ -197,18 +198,19 @@ mod tests {
 
     #[test]
     fn parses_add_mirror() {
-        let json =
-            r#"{"type":"add_mirror","window_id":1,"view_id":2,"x":0,"y":0,"w":400,"h":300}"#;
+        let json = r#"{"type":"add_mirror","window_id":1,"view_id":2,"x":0,"y":0,"w":400,"h":300}"#;
         let msg: IncomingMessage = serde_json::from_str(json).unwrap();
         assert!(matches!(
             msg,
             IncomingMessage::AddMirror {
                 window_id: 1,
                 view_id: 2,
-                x: 0,
-                y: 0,
-                w: 400,
-                h: 300,
+                rect: IpcRect {
+                    x: 0,
+                    y: 0,
+                    w: 400,
+                    h: 300,
+                },
             }
         ));
     }
@@ -259,9 +261,7 @@ mod tests {
         let msg: IncomingMessage = serde_json::from_str(json).unwrap();
         assert!(matches!(
             msg,
-            IncomingMessage::SetFocus {
-                window_id: Some(9),
-            }
+            IncomingMessage::SetFocus { window_id: Some(9) }
         ));
     }
 
@@ -269,10 +269,7 @@ mod tests {
     fn parses_set_focus_without_window_id() {
         let json = r#"{"type":"set_focus"}"#;
         let msg: IncomingMessage = serde_json::from_str(json).unwrap();
-        assert!(matches!(
-            msg,
-            IncomingMessage::SetFocus { window_id: None }
-        ));
+        assert!(matches!(msg, IncomingMessage::SetFocus { window_id: None }));
     }
 
     #[test]
@@ -294,7 +291,7 @@ mod tests {
                 assert!(enabled);
                 assert_eq!(rects.len(), 1);
                 assert_eq!(rects[0].kind, "window");
-                assert_eq!(rects[0].w, 100);
+                assert_eq!(rects[0].rect.w, 100);
             }
             _ => panic!("expected SetSkeleton"),
         }
@@ -424,7 +421,8 @@ mod tests {
 
     #[test]
     fn skeleton_rect_with_optional_fields() {
-        let json = r#"{"kind":"window","label":"*scratch*","x":0,"y":28,"w":800,"h":500,"selected":true}"#;
+        let json =
+            r#"{"kind":"window","label":"*scratch*","x":0,"y":28,"w":800,"h":500,"selected":true}"#;
         let rect: SkeletonRect = serde_json::from_str(json).unwrap();
         assert_eq!(rect.label, "*scratch*");
         assert!(rect.selected);

@@ -75,9 +75,7 @@ pub fn event_loop_tick(state: &mut EmskinState) {
         if let Some(space) = state.space_for_workspace_mut(ws_id) {
             space.map_element(window, geo.loc, false);
         }
-        tracing::debug!(
-            "embedded app window_id={window_id} geometry force-committed (timeout)"
-        );
+        tracing::debug!("embedded app window_id={window_id} geometry force-committed (timeout)");
     }
 }
 
@@ -138,15 +136,12 @@ fn process_pending_toplevels(state: &mut EmskinState) {
             // Resize existing Emacs frames for bar (1→2 workspace transition).
             resize_all_emacs_for_bar(state);
 
-            state
-                .ipc
-                .send(OutgoingMessage::WorkspaceCreated { workspace_id: ws_id });
+            state.ipc.send(OutgoingMessage::WorkspaceCreated {
+                workspace_id: ws_id,
+            });
 
             // Switch immediately.
             state.switch_workspace(ws_id);
-            state
-                .ipc
-                .send(OutgoingMessage::WorkspaceSwitched { workspace_id: ws_id });
         }
     }
 }
@@ -161,11 +156,7 @@ fn process_workspace_actions(state: &mut EmskinState) {
         use crate::protocols::workspace::WorkspaceAction;
         match action {
             WorkspaceAction::Activate(id) => {
-                if state.switch_workspace(id) {
-                    state
-                        .ipc
-                        .send(OutgoingMessage::WorkspaceSwitched { workspace_id: id });
-                }
+                state.switch_workspace(id);
             }
             WorkspaceAction::Remove(id) => {
                 if id != state.active_workspace_id {
@@ -191,9 +182,9 @@ fn detect_dead_workspaces(state: &mut EmskinState) {
     let had_dead = !dead_ws.is_empty();
     for ws_id in dead_ws {
         state.destroy_workspace(ws_id);
-        state
-            .ipc
-            .send(OutgoingMessage::WorkspaceDestroyed { workspace_id: ws_id });
+        state.ipc.send(OutgoingMessage::WorkspaceDestroyed {
+            workspace_id: ws_id,
+        });
         tracing::info!("workspace {ws_id} destroyed (Emacs frame died)");
     }
     if had_dead {
@@ -203,18 +194,10 @@ fn detect_dead_workspaces(state: &mut EmskinState) {
     }
 
     // Detect active Emacs frame death.
-    if state
-        .emacs_surface
-        .as_ref()
-        .is_some_and(|s| !s.is_alive())
-        && state.initial_size_settled
-    {
+    if state.emacs_surface.as_ref().is_some_and(|s| !s.is_alive()) && state.initial_size_settled {
         if let Some(&fallback_id) = state.inactive_workspaces.keys().next() {
             tracing::info!("active Emacs died, switching to workspace {fallback_id}");
             state.switch_workspace(fallback_id);
-            state.ipc.send(OutgoingMessage::WorkspaceSwitched {
-                workspace_id: fallback_id,
-            });
             state.needs_redraw = true;
         } else {
             tracing::info!("last Emacs frame died, stopping");

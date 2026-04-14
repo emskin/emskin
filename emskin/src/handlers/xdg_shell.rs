@@ -118,11 +118,15 @@ impl XdgShellHandler for EmskinState {
             self.ipc
                 .send(crate::ipc::OutgoingMessage::WindowCreated { window_id, title });
 
-            // Auto-focus: give keyboard focus to the new window and notify
-            // Emacs so it switches to the corresponding buffer.
-            if let Some(keyboard) = self.seat.get_keyboard() {
-                let serial = SERIAL_COUNTER.next_serial();
-                keyboard.set_focus(self, wl_surface, serial);
+            // Auto-focus: give keyboard focus to the new window UNLESS a
+            // prefix key sequence is in progress (focus was redirected to
+            // Emacs for C-x / C-c / M-x — stealing focus now would break
+            // the sequence and leave prefix_saved_focus stuck).
+            if self.focus.prefix_saved_focus.is_none() {
+                if let Some(keyboard) = self.seat.get_keyboard() {
+                    let serial = SERIAL_COUNTER.next_serial();
+                    keyboard.set_focus(self, wl_surface, serial);
+                }
             }
             self.ipc.send(crate::ipc::OutgoingMessage::FocusView {
                 window_id,

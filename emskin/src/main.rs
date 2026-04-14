@@ -298,8 +298,14 @@ fn start_xwayland(
                     {
                         use smithay::wayland::selection::SelectionTarget;
                         let pairs = [
-                            (SelectionTarget::Clipboard, &state.selection.host_clipboard_mimes),
-                            (SelectionTarget::Primary, &state.selection.host_primary_mimes),
+                            (
+                                SelectionTarget::Clipboard,
+                                &state.selection.host_clipboard_mimes,
+                            ),
+                            (
+                                SelectionTarget::Primary,
+                                &state.selection.host_primary_mimes,
+                            ),
                         ];
                         for (target, mimes) in pairs {
                             if !mimes.is_empty() {

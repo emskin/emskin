@@ -28,7 +28,6 @@ use wayland_protocols_wlr::data_control::v1::client::{
 
 use smithay::wayland::selection::SelectionTarget;
 
-
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------

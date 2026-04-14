@@ -138,11 +138,7 @@ fn forward_client_selection(
 
 /// Register a pipe read_fd with calloop for event-driven reading.
 /// Returns `false` if registration fails (caller should clean up).
-fn register_outgoing_pipe(
-    state: &mut EmskinState,
-    id: u64,
-    read_fd: std::os::fd::OwnedFd,
-) -> bool {
+fn register_outgoing_pipe(state: &mut EmskinState, id: u64, read_fd: std::os::fd::OwnedFd) -> bool {
     use smithay::reexports::calloop::{generic::Generic, Interest, Mode, PostAction};
     use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd};
 

@@ -24,15 +24,9 @@ use smithay::{
         pointer::{CursorImageStatus, CursorImageSurfaceData},
     },
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
-    reexports::{
-        calloop::EventLoop,
-        wayland_server::Resource,
-    },
+    reexports::{calloop::EventLoop, wayland_server::Resource},
     utils::{Logical, Physical, Rectangle, Size, Transform, SERIAL_COUNTER},
-    wayland::{
-        compositor::with_states,
-        seat::WaylandFocus,
-    },
+    wayland::{compositor::with_states, seat::WaylandFocus},
 };
 
 use crate::EmskinState;
@@ -285,7 +279,9 @@ fn render_frame(
         custom_elements.extend(build_layer_surface_elements(renderer, output, scale));
 
         // Mirrors: bottom of the custom layer stack.
-        custom_elements.extend(crate::mirror_render::build_mirror_elements(state, renderer, scale));
+        custom_elements.extend(crate::mirror_render::build_mirror_elements(
+            state, renderer, scale,
+        ));
 
         let render_scale = 1.0;
         if let Err(e) = smithay::desktop::space::render_output::<_, CustomElement<GlesRenderer>, _, _>(

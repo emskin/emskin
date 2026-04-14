@@ -1,16 +1,10 @@
-use crate::ipc::{IncomingMessage, OutgoingMessage};
+use crate::ipc::IncomingMessage;
 use crate::EmskinState;
 
 pub fn handle_ipc_message(state: &mut EmskinState, msg: IncomingMessage) {
     match msg {
-        IncomingMessage::SetGeometry {
-            window_id,
-            x,
-            y,
-            w,
-            h,
-        } => {
-            ipc_set_geometry(state, window_id, x, y, w, h);
+        IncomingMessage::SetGeometry { window_id, rect } => {
+            ipc_set_geometry(state, window_id, rect);
         }
         IncomingMessage::Close { window_id } => {
             ipc_close(state, window_id);
@@ -24,22 +18,16 @@ pub fn handle_ipc_message(state: &mut EmskinState, msg: IncomingMessage) {
         IncomingMessage::AddMirror {
             window_id,
             view_id,
-            x,
-            y,
-            w,
-            h,
+            rect,
         } => {
-            ipc_add_mirror(state, window_id, view_id, x, y, w, h);
+            ipc_add_mirror(state, window_id, view_id, rect);
         }
         IncomingMessage::UpdateMirrorGeometry {
             window_id,
             view_id,
-            x,
-            y,
-            w,
-            h,
+            rect,
         } => {
-            ipc_update_mirror_geometry(state, window_id, view_id, x, y, w, h);
+            ipc_update_mirror_geometry(state, window_id, view_id, rect);
         }
         IncomingMessage::RemoveMirror { window_id, view_id } => {
             ipc_remove_mirror(state, window_id, view_id);
@@ -65,16 +53,15 @@ pub fn handle_ipc_message(state: &mut EmskinState, msg: IncomingMessage) {
         }
         IncomingMessage::SwitchWorkspace { workspace_id } => {
             tracing::debug!("IPC switch_workspace {workspace_id}");
-            if state.switch_workspace(workspace_id) {
-                state
-                    .ipc
-                    .send(OutgoingMessage::WorkspaceSwitched { workspace_id });
-            }
+            // switch_workspace sends WorkspaceSwitched IPC internally
+            // (before keyboard.set_focus to avoid race conditions).
+            state.switch_workspace(workspace_id);
         }
     }
 }
 
-fn ipc_set_geometry(state: &mut EmskinState, window_id: u64, x: i32, y: i32, w: i32, h: i32) {
+fn ipc_set_geometry(state: &mut EmskinState, window_id: u64, rect: crate::ipc::IpcRect) {
+    let crate::ipc::IpcRect { x, y, w, h } = rect;
     tracing::debug!("IPC set_geometry window={window_id} ({x},{y},{w},{h})");
     if w <= 0 || h <= 0 {
         tracing::warn!("IPC set_geometry: invalid size ({w}x{h}), ignoring");
@@ -189,12 +176,10 @@ fn ipc_add_mirror(
     state: &mut EmskinState,
     window_id: u64,
     view_id: u64,
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
+    rect: crate::ipc::IpcRect,
 ) {
-    // Compositor auto-binds to active workspace — elisp doesn't need to know.
+    let crate::ipc::IpcRect { x, y, w, h } = rect;
+    // Compositor auto-binds to active workspace.
     let ws_id = state.active_workspace_id;
     tracing::debug!(
         "IPC add_mirror window={window_id} view={view_id} ({x},{y},{w},{h}) ws={ws_id}"
@@ -222,11 +207,9 @@ fn ipc_update_mirror_geometry(
     state: &mut EmskinState,
     window_id: u64,
     view_id: u64,
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
+    rect: crate::ipc::IpcRect,
 ) {
+    let crate::ipc::IpcRect { x, y, w, h } = rect;
     tracing::debug!(
         "IPC update_mirror_geometry window={window_id} view={view_id} ({x},{y},{w},{h})"
     );
