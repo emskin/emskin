@@ -888,3 +888,42 @@ impl X11ClipboardProxy {
         unsafe { Some((OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1]))) }
     }
 }
+
+impl crate::clipboard::ClipboardBackend for X11ClipboardProxy {
+    fn dispatch(&mut self) {
+        self.dispatch();
+    }
+
+    fn take_events(&mut self) -> Vec<ClipboardEvent> {
+        self.take_events()
+    }
+
+    fn connection_fd(&self) -> BorrowedFd<'_> {
+        self.connection_fd()
+    }
+
+    fn receive_from_host(
+        &mut self,
+        target: smithay::wayland::selection::SelectionTarget,
+        mime_type: &str,
+        fd: OwnedFd,
+    ) {
+        self.receive_from_host(target, mime_type, fd);
+    }
+
+    fn set_host_selection(
+        &mut self,
+        target: smithay::wayland::selection::SelectionTarget,
+        mime_types: &[String],
+    ) {
+        self.set_host_selection(target, mime_types);
+    }
+
+    fn clear_host_selection(&mut self, target: smithay::wayland::selection::SelectionTarget) {
+        self.clear_host_selection(target);
+    }
+
+    fn complete_outgoing(&mut self, id: u64, data: Vec<u8>) {
+        self.complete_outgoing(id, data);
+    }
+}

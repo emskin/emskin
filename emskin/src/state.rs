@@ -159,7 +159,7 @@ pub struct EmskinState {
     pub pending_command: Option<PendingCommand>,
 
     /// Clipboard synchronization proxy (Wayland or X11 backend, None if unavailable)
-    pub clipboard: Option<crate::clipboard::HostClipboard>,
+    pub clipboard: Option<Box<dyn crate::clipboard::ClipboardBackend>>,
 
     /// Where the current clipboard/primary selection came from.
     /// Used to route host paste requests to the correct source.

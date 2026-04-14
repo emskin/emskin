@@ -86,10 +86,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize clipboard synchronization with host compositor.
     // Try Wayland data_control first; fall back to X11 selection protocol.
     state.clipboard = clipboard::ClipboardProxy::new()
-        .map(clipboard::HostClipboard::Wayland)
-        .or_else(|| clipboard_x11::X11ClipboardProxy::new().map(clipboard::HostClipboard::X11));
+        .map(|p| Box::new(p) as Box<dyn clipboard::ClipboardBackend>)
+        .or_else(|| {
+            clipboard_x11::X11ClipboardProxy::new()
+                .map(|p| Box::new(p) as Box<dyn clipboard::ClipboardBackend>)
+        });
     if let Some(ref clipboard) = state.clipboard {
-        register_clipboard_source(&mut event_loop, clipboard)?;
+        register_clipboard_source(&mut event_loop, clipboard.as_ref())?;
     }
 
     register_ipc_source(&mut event_loop, &state)?;
@@ -925,7 +928,7 @@ fn start_xwayland(
 
 fn register_clipboard_source(
     event_loop: &mut smithay::reexports::calloop::EventLoop<EmskinState>,
-    clipboard: &clipboard::HostClipboard,
+    clipboard: &dyn clipboard::ClipboardBackend,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use smithay::reexports::calloop::{generic::Generic, Interest, Mode, PostAction};
     use std::os::unix::io::{AsRawFd, FromRawFd};

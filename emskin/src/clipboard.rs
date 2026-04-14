@@ -28,73 +28,39 @@ use wayland_protocols_wlr::data_control::v1::client::{
 
 use smithay::wayland::selection::SelectionTarget;
 
-use crate::clipboard_x11::X11ClipboardProxy;
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
-/// Unified host clipboard backend (Wayland or X11).
-pub enum HostClipboard {
-    Wayland(ClipboardProxy),
-    X11(X11ClipboardProxy),
-}
+/// Trait for host clipboard backends (Wayland data_control or X11 selection).
+pub trait ClipboardBackend {
+    /// Read pending events from the host connection.
+    fn dispatch(&mut self);
 
-impl HostClipboard {
-    pub fn dispatch(&mut self) {
-        match self {
-            Self::Wayland(p) => p.dispatch(),
-            Self::X11(p) => p.dispatch(),
-        }
-    }
+    /// Drain queued clipboard events for processing by the compositor.
+    fn take_events(&mut self) -> Vec<ClipboardEvent>;
 
-    pub fn take_events(&mut self) -> Vec<ClipboardEvent> {
-        match self {
-            Self::Wayland(p) => p.take_events(),
-            Self::X11(p) => p.take_events(),
-        }
-    }
+    /// Borrow the connection fd for calloop registration.
+    fn connection_fd(&self) -> std::os::fd::BorrowedFd<'_>;
 
-    pub fn connection_fd(&self) -> std::os::fd::BorrowedFd<'_> {
-        match self {
-            Self::Wayland(p) => p.connection_fd(),
-            Self::X11(p) => p.connection_fd(),
-        }
-    }
-
-    pub fn receive_from_host(
+    /// Forward host clipboard data to an internal client's fd.
+    fn receive_from_host(
         &mut self,
         target: SelectionTarget,
         mime_type: &str,
         fd: std::os::fd::OwnedFd,
-    ) {
-        match self {
-            Self::Wayland(p) => p.receive_from_host(target, mime_type, fd),
-            Self::X11(p) => p.receive_from_host(target, mime_type, fd),
-        }
-    }
+    );
 
-    pub fn set_host_selection(&mut self, target: SelectionTarget, mime_types: &[String]) {
-        match self {
-            Self::Wayland(p) => p.set_host_selection(target, mime_types),
-            Self::X11(p) => p.set_host_selection(target, mime_types),
-        }
-    }
+    /// Advertise an internal client's selection to the host compositor.
+    fn set_host_selection(&mut self, target: SelectionTarget, mime_types: &[String]);
 
-    pub fn clear_host_selection(&mut self, target: SelectionTarget) {
-        match self {
-            Self::Wayland(p) => p.clear_host_selection(target),
-            Self::X11(p) => p.clear_host_selection(target),
-        }
-    }
+    /// Clear our selection on the host.
+    fn clear_host_selection(&mut self, target: SelectionTarget);
 
     /// Complete an outgoing transfer (pipe data fully read by calloop).
-    pub fn complete_outgoing(&mut self, id: u64, data: Vec<u8>) {
-        match self {
-            Self::X11(p) => p.complete_outgoing(id, data),
-            Self::Wayland(_) => {}
-        }
-    }
+    /// Default is no-op (only X11 backend needs this).
+    fn complete_outgoing(&mut self, _id: u64, _data: Vec<u8>) {}
 }
 
 /// Events from host clipboard that need processing by the compositor.
@@ -503,7 +469,7 @@ impl ClipboardProxy {
     }
 
     /// Forward host clipboard data to an internal client's fd.
-    pub fn receive_from_host(&self, target: SelectionTarget, mime_type: &str, fd: OwnedFd) {
+    pub fn receive_from_host(&mut self, target: SelectionTarget, mime_type: &str, fd: OwnedFd) {
         let offer = match target {
             SelectionTarget::Clipboard => self.inner.clipboard_offer.as_ref(),
             SelectionTarget::Primary => self.inner.primary_offer.as_ref(),
@@ -564,6 +530,37 @@ impl ClipboardProxy {
         }
         *suppress += 1;
         self.flush();
+    }
+}
+
+impl ClipboardBackend for ClipboardProxy {
+    fn dispatch(&mut self) {
+        self.dispatch();
+    }
+
+    fn take_events(&mut self) -> Vec<ClipboardEvent> {
+        self.take_events()
+    }
+
+    fn connection_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        self.connection_fd()
+    }
+
+    fn receive_from_host(
+        &mut self,
+        target: SelectionTarget,
+        mime_type: &str,
+        fd: std::os::fd::OwnedFd,
+    ) {
+        self.receive_from_host(target, mime_type, fd);
+    }
+
+    fn set_host_selection(&mut self, target: SelectionTarget, mime_types: &[String]) {
+        self.set_host_selection(target, mime_types);
+    }
+
+    fn clear_host_selection(&mut self, target: SelectionTarget) {
+        self.clear_host_selection(target);
     }
 }
 
