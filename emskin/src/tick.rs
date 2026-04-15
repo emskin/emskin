@@ -303,8 +303,7 @@ pub fn resize_all_emacs_for_bar(state: &mut EmskinState) {
         state::resize_emacs_in_space(&mut ws.space, &ws.emacs_surface, &ws.emacs_x11_window, geo);
     }
 
-    state.ipc.send(OutgoingMessage::SurfaceSize {
-        width: geo.size.w,
-        height: geo.size.h,
-    });
+    // Do NOT send SurfaceSize here — the compositor window size hasn't
+    // changed, only the internal bar/Emacs split. SurfaceSize is sent by
+    // the winit resize handler and xdg_shell initial configure.
 }
