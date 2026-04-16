@@ -16,6 +16,16 @@ pub fn event_loop_tick(state: &mut EmskinState) {
         }
     }
 
+    // --- Reap the bar child if it exited unexpectedly ---
+    // The bar is non-critical; a crash shouldn't take down the compositor,
+    // but leaving it as a zombie would be visible as <defunct> in ps.
+    if let Some(ref mut child) = state.bar_child {
+        if let Ok(Some(status)) = child.try_wait() {
+            tracing::warn!("emskin-bar exited with {status}");
+            state.bar_child = None;
+        }
+    }
+
     // --- Workspace: process deferred Emacs toplevels ---
     // After dispatch_clients, set_parent has been processed for same-batch
     // toplevels, so surface.parent() is now accurate.

@@ -245,8 +245,23 @@ fn spawn_bar(mode: &str, state: &mut EmskinState) {
         explicit => std::path::PathBuf::from(explicit),
     };
 
-    tracing::info!("Spawning workspace bar: {}", binary.display());
-    match std::process::Command::new(&binary).spawn() {
+    // The bar must connect to *our* Wayland socket, not the host compositor's
+    // — otherwise it'd fail to bind ext-workspace-v1 / wlr-layer-shell and
+    // die immediately. `socket_name` is the name emskin advertised in
+    // XDG_RUNTIME_DIR.
+    let Some(socket_name) = state.socket_name.to_str() else {
+        tracing::error!("Wayland socket name is not valid UTF-8, cannot spawn bar");
+        return;
+    };
+
+    tracing::info!(
+        "Spawning workspace bar: {} (WAYLAND_DISPLAY={socket_name})",
+        binary.display(),
+    );
+    match std::process::Command::new(&binary)
+        .env("WAYLAND_DISPLAY", socket_name)
+        .spawn()
+    {
         Ok(child) => state.bar_child = Some(child),
         Err(e) => {
             tracing::warn!("Failed to spawn bar {}: {e}", binary.display());
