@@ -1,6 +1,6 @@
 [package]
 name = "emskin"
-version = "0.1.0"
+version = "0.1.4"
 edition = "2021"
 authors = ["Lee <loyalpartner@163.com>"]
 description = "Nested Wayland compositor for Emacs"
