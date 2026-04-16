@@ -308,17 +308,6 @@ fn post_render(state: &mut EmskinState, output: &Output) {
     }
 }
 
-/// Resize only the Emacs toplevel; embedded app sizes come from Emacs via IPC.
-fn resize_emacs_surface(state: &mut EmskinState, logical: Size<i32, Logical>) {
-    let geo = smithay::utils::Rectangle::new((0, 0).into(), logical);
-    crate::state::resize_emacs_in_space(
-        &mut state.space,
-        &state.emacs_surface.clone(),
-        &state.emacs_x11_window.clone(),
-        geo,
-    );
-}
-
 pub fn init_winit(
     event_loop: &mut EventLoop<EmskinState>,
     state: &mut EmskinState,
@@ -382,22 +371,23 @@ pub fn init_winit(
                         Some(Scale::Fractional(scale_factor)),
                         None,
                     );
+                    // LayerMap caches `non_exclusive_zone` inside its `zone`
+                    // field — it only refreshes when `arrange()` runs. Without
+                    // this call, effects and Emacs would keep seeing the old
+                    // canvas after a winit resize.
+                    {
+                        let mut map = smithay::desktop::layer_map_for_output(&output);
+                        map.arrange();
+                    }
 
                     if state.initial_size_settled {
-                        let logical = size.to_f64().to_logical(scale_factor).to_i32_round();
-                        resize_emacs_surface(state, logical);
-                        // Also resize Emacs in all inactive workspaces.
-                        let geo = smithay::utils::Rectangle::new((0, 0).into(), logical);
-                        for ws in state.inactive_workspaces.values_mut() {
-                            crate::state::resize_emacs_in_space(
-                                &mut ws.space,
-                                &ws.emacs_surface,
-                                &ws.emacs_x11_window,
-                                geo,
-                            );
-                        }
+                        // Re-lays out every Emacs frame against the fresh
+                        // non_exclusive_zone and broadcasts SurfaceSize — also
+                        // sets needs_redraw.
+                        state.relayout_emacs();
+                    } else {
+                        state.needs_redraw = true;
                     }
-                    state.needs_redraw = true;
                 }
 
                 WinitEvent::Input(event) => {

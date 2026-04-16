@@ -131,6 +131,12 @@ impl BarState {
         match (self.layer.is_some(), should_show) {
             (false, true) => self.create_layer(qh),
             (true, false) => self.destroy_layer(),
+            // Draw directly instead of waiting for a frame callback:
+            // we only get a frame callback if the previous draw scheduled
+            // one, and we stop scheduling them when there's no redraw to
+            // do — so a frame callback may not be pending when state
+            // changes arrive. Commit now; draw() re-arms the callback.
+            (true, true) if self.configured_once => self.draw(qh),
             (true, true) => self.needs_redraw = true,
             (false, false) => {}
         }
@@ -364,13 +370,10 @@ impl LayerShellHandler for BarState {
         let w = if w == 0 { 1 } else { w };
         let h = if h == 0 { BAR_HEIGHT } else { h };
         self.surface_size = Some((w, h));
-        let first = !self.configured_once;
         self.configured_once = true;
-        if first {
-            self.draw(qh);
-        } else {
-            self.needs_redraw = true;
-        }
+        // Always redraw on configure — the compositor is waiting for us to
+        // attach a buffer of the configured size.
+        self.draw(qh);
     }
 }
 

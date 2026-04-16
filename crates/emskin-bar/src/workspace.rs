@@ -100,6 +100,16 @@ impl Dispatch<ExtWorkspaceManagerV1, ()> for BarState {
             Event::Done => {
                 state.workspaces.append(&mut state.pending_workspaces);
                 state.workspaces.sort_by_key(|w| w.id);
+                tracing::debug!(
+                    "done: {} workspaces, active={:?}",
+                    state.workspaces.len(),
+                    state
+                        .workspaces
+                        .iter()
+                        .filter(|w| w.active)
+                        .map(|w| w.id)
+                        .collect::<Vec<_>>(),
+                );
                 state.update_visibility(qh);
             }
             Event::Finished => {
@@ -168,7 +178,11 @@ impl Dispatch<ExtWorkspaceHandleV1, ()> for BarState {
             Event::State {
                 state: wayland_client::WEnum::Value(flags),
             } => {
-                entry.active = flags.contains(WsState::Active);
+                let new_active = flags.contains(WsState::Active);
+                if new_active != entry.active {
+                    tracing::debug!("workspace {} active {} → {}", entry.id, entry.active, new_active);
+                }
+                entry.active = new_active;
             }
             Event::Removed => {
                 // Retain-filter below removes the entry from whichever list
