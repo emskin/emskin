@@ -1,26 +1,27 @@
 [package]
 name = "emskin"
-version = "0.1.4"
-edition = "2021"
-authors = ["Lee <loyalpartner@163.com>"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Nested Wayland compositor for Emacs"
-license = "GPL-3.0"
-repository = "https://github.com/emskin/emskin"
 
 [dependencies]
-tracing = "0.1"
+smithay.workspace = true
+cosmic-text.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 bitflags = "2.2.1"
 winit_crate = { package = "winit", version = "0.30", default-features = false }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "server", "staging"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 libc = "0.2"
 clap = { version = "4", features = ["derive"] }
 include_dir = "0.7"
-cosmic-text = "0.18"
 
 [package.metadata.aur]
 depends = ["wayland", "libxkbcommon", "libxkbcommon-x11", "mesa", "libinput", "seatd", "fontconfig", "freetype2", "xorg-xwayland"]
@@ -28,16 +29,4 @@ optdepends = ["emacs-wayland: pgtk Emacs (recommended)", "emacs: X11 Emacs (work
 files = [
     ["assets/emskin.desktop", "/usr/share/applications/emskin.desktop"],
     ["assets/emskin.png", "/usr/share/pixmaps/emskin.png"],
-]
-
-[dependencies.smithay]
-git = "https://github.com/emskin/smithay.git"
-branch = "emskin-patches"
-default-features = false
-features = [
-    "backend_winit",
-    "backend_drm",
-    "wayland_frontend",
-    "desktop",
-    "xwayland",
 ]
