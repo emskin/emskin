@@ -43,8 +43,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            target
             emskin/target
-          key: arch-x86_64-release-${{ hashFiles('emskin/Cargo.lock', 'emskin/Cargo.toml') }}
+          key: arch-x86_64-release-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'emskin/Cargo.toml', 'effect-core/Cargo.toml', 'effect-plugins/Cargo.toml') }}
           restore-keys: arch-x86_64-release-
 
       - name: Build and package with cargo-aur
