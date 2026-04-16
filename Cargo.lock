@@ -535,6 +535,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "effect-plugins"
+version = "0.1.4"
+dependencies = [
+ "cosmic-text",
+ "effect-core",
+ "serde",
+ "serde_json",
+ "smithay",
+ "tracing",
+]
+
+[[package]]
 name = "emskin"
 version = "0.1.4"
 dependencies = [
@@ -542,6 +554,7 @@ dependencies = [
  "clap",
  "cosmic-text",
  "effect-core",
+ "effect-plugins",
  "include_dir",
  "libc",
  "serde",

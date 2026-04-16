@@ -1,0 +1,16 @@
+[package]
+name = "effect-plugins"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Built-in effects for emskin (measure, skeleton, splash, workspace_bar)"
+
+[dependencies]
+effect-core = { path = "../effect-core" }
+smithay.workspace = true
+cosmic-text.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true

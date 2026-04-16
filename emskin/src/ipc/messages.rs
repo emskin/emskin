@@ -74,18 +74,12 @@ pub enum IncomingMessage {
 /// A single rectangle in the skeleton overlay. Emacs-side kinds currently
 /// in use: "frame", "chrome", "menu-bar", "tool-bar", "tab-bar", "window",
 /// "header-line", "mode-line", "echo-area". Any unknown kind renders with
-/// the default color. `label` is an optional extra description — for
-/// "window" kind it carries the buffer name.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SkeletonRect {
-    pub kind: String,
-    #[serde(default)]
-    pub label: String,
-    #[serde(flatten)]
-    pub rect: IpcRect,
-    #[serde(default)]
-    pub selected: bool,
-}
+/// Re-export the wire type from the `effect-plugins` crate so IPC messages
+/// here can reference `SkeletonRect` without duplicating the struct definition.
+/// The type's JSON shape is still `{kind, label, x, y, w, h, selected}` — it
+/// round-trips through an internal wire struct; the Rust-side representation
+/// stores the rect as `smithay::utils::Rectangle<i32, Logical>`.
+pub use effect_plugins::skeleton::SkeletonRect;
 
 /// emskin → Emacs
 #[derive(Debug, Clone, Serialize)]
@@ -288,7 +282,7 @@ mod tests {
                 assert!(enabled);
                 assert_eq!(rects.len(), 1);
                 assert_eq!(rects[0].kind, "window");
-                assert_eq!(rects[0].rect.w, 100);
+                assert_eq!(rects[0].rect.size.w, 100);
             }
             _ => panic!("expected SetSkeleton"),
         }

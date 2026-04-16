@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["effect-core", "emskin"]
+members = ["effect-core", "effect-plugins", "emskin"]
 
 [workspace.package]
 version = "0.1.4"

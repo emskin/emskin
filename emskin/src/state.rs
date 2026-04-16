@@ -206,10 +206,10 @@ pub struct EmskinState {
     /// `effect_chain` via `EffectHandle`. Lets window-manager code (input
     /// routing, IPC dispatch, workspace-switch reset) call the overlay's
     /// typed setters directly without going through the trait.
-    pub measure: std::rc::Rc<std::cell::RefCell<crate::measure::MeasureOverlay>>,
-    pub skeleton: std::rc::Rc<std::cell::RefCell<crate::skeleton::SkeletonOverlay>>,
-    pub splash: std::rc::Rc<std::cell::RefCell<crate::splash::SplashScreen>>,
-    pub workspace_bar: std::rc::Rc<std::cell::RefCell<crate::workspace_bar::WorkspaceBar>>,
+    pub measure: std::rc::Rc<std::cell::RefCell<effect_plugins::measure::MeasureOverlay>>,
+    pub skeleton: std::rc::Rc<std::cell::RefCell<effect_plugins::skeleton::SkeletonOverlay>>,
+    pub splash: std::rc::Rc<std::cell::RefCell<effect_plugins::splash::SplashScreen>>,
+    pub workspace_bar: std::rc::Rc<std::cell::RefCell<effect_plugins::workspace_bar::WorkspaceBar>>,
 
     /// Whether a skeleton label-click was swallowed — matching release must
     /// also be swallowed. Lives in the window manager, not the overlay.
@@ -281,11 +281,22 @@ impl EmskinState {
         // reset) and the `EffectHandle` wrapper registered into the chain
         // (for rendering). `register_overlay` does both in one step.
         let mut effect_chain = effect_core::EffectChain::default();
-        let splash = register_overlay(&mut effect_chain, crate::splash::SplashScreen::new());
-        let workspace_bar =
-            register_overlay(&mut effect_chain, crate::workspace_bar::WorkspaceBar::new());
-        let skeleton = register_overlay(&mut effect_chain, crate::skeleton::SkeletonOverlay::new());
-        let measure = register_overlay(&mut effect_chain, crate::measure::MeasureOverlay::new());
+        let splash = register_overlay(
+            &mut effect_chain,
+            effect_plugins::splash::SplashScreen::new(),
+        );
+        let workspace_bar = register_overlay(
+            &mut effect_chain,
+            effect_plugins::workspace_bar::WorkspaceBar::new(),
+        );
+        let skeleton = register_overlay(
+            &mut effect_chain,
+            effect_plugins::skeleton::SkeletonOverlay::new(),
+        );
+        let measure = register_overlay(
+            &mut effect_chain,
+            effect_plugins::measure::MeasureOverlay::new(),
+        );
 
         Ok(Self {
             start_time,
@@ -416,7 +427,7 @@ impl EmskinState {
     /// Workspace bar height (only when 2+ workspaces and bar enabled).
     pub fn bar_height(&self) -> i32 {
         if self.bar_enabled && self.workspace_count() > 1 {
-            crate::workspace_bar::BAR_HEIGHT
+            effect_plugins::workspace_bar::BAR_HEIGHT
         } else {
             0
         }

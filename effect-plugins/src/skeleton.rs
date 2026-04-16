@@ -28,7 +28,64 @@ use smithay::{
     utils::{Buffer as SBuffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform},
 };
 
-use crate::ipc::SkeletonRect;
+use serde::{Deserialize, Serialize};
+use smithay::utils::{Point as SPoint, Size as SSize};
+
+/// Wire format: flat `{kind, label, x, y, w, h, selected}` JSON shape that
+/// matches what Emacs's `emskin--report-skeleton` sends.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SkeletonRectWire {
+    kind: String,
+    #[serde(default)]
+    label: String,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    #[serde(default)]
+    selected: bool,
+}
+
+/// A single rect pushed by Emacs via the `set_skeleton` IPC. Kind is one of:
+/// frame / chrome / menu-bar / tool-bar / tab-bar / window / header-line /
+/// tab-line / mode-line / echo-area / mini-buffer / (unknown).
+///
+/// Rust-side representation uses smithay's typed `Rectangle<i32, Logical>`;
+/// serde serialization round-trips through `SkeletonRectWire` to preserve the
+/// existing flat JSON wire format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "SkeletonRectWire", into = "SkeletonRectWire")]
+pub struct SkeletonRect {
+    pub kind: String,
+    pub label: String,
+    pub rect: Rectangle<i32, Logical>,
+    pub selected: bool,
+}
+
+impl From<SkeletonRectWire> for SkeletonRect {
+    fn from(w: SkeletonRectWire) -> Self {
+        Self {
+            kind: w.kind,
+            label: w.label,
+            rect: Rectangle::new(SPoint::from((w.x, w.y)), SSize::from((w.w, w.h))),
+            selected: w.selected,
+        }
+    }
+}
+
+impl From<SkeletonRect> for SkeletonRectWire {
+    fn from(r: SkeletonRect) -> Self {
+        Self {
+            kind: r.kind,
+            label: r.label,
+            x: r.rect.loc.x,
+            y: r.rect.loc.y,
+            w: r.rect.size.w,
+            h: r.rect.size.h,
+            selected: r.selected,
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Color palette (RGBA linear, matches SolidColorRenderElement's format).
@@ -130,12 +187,7 @@ impl Entry {
             rect: SkeletonRect {
                 kind: String::new(),
                 label: String::new(),
-                rect: crate::ipc::IpcRect {
-                    x: 0,
-                    y: 0,
-                    w: 0,
-                    h: 0,
-                },
+                rect: Rectangle::default(),
                 selected: false,
             },
             draw_rect: (0, 0, 0, 0),
@@ -244,12 +296,17 @@ impl SkeletonOverlay {
             let text = if rect.label.is_empty() {
                 format!(
                     "{} ({},{}) {}x{}",
-                    rect.kind, rect.rect.x, rect.rect.y, rect.rect.w, rect.rect.h
+                    rect.kind, rect.rect.loc.x, rect.rect.loc.y, rect.rect.size.w, rect.rect.size.h
                 )
             } else {
                 format!(
                     "{} {} ({},{}) {}x{}",
-                    rect.kind, rect.label, rect.rect.x, rect.rect.y, rect.rect.w, rect.rect.h
+                    rect.kind,
+                    rect.label,
+                    rect.rect.loc.x,
+                    rect.rect.loc.y,
+                    rect.rect.size.w,
+                    rect.rect.size.h
                 )
             };
             let fg = color_fg_bgra(color_for(&rect.kind, rect.selected));
@@ -290,24 +347,24 @@ impl SkeletonOverlay {
             let mut depth = 0i32;
             for j in 0..i {
                 let r_j = self.entries[j].rect.rect;
-                if r_j.x <= r_i.x
-                    && r_j.y <= r_i.y
-                    && r_j.x + r_j.w >= r_i.x + r_i.w
-                    && r_j.y + r_j.h >= r_i.y + r_i.h
+                if r_j.loc.x <= r_i.loc.x
+                    && r_j.loc.y <= r_i.loc.y
+                    && r_j.loc.x + r_j.size.w >= r_i.loc.x + r_i.size.w
+                    && r_j.loc.y + r_j.size.h >= r_i.loc.y + r_i.size.h
                 {
                     depth += 1;
                 }
             }
             let raw_inset = (depth * INSET_STEP).min(MAX_INSET);
             // Clamp so a tiny rect never collapses to zero or negative.
-            let max_w_inset = (r_i.w / 3).max(0);
-            let max_h_inset = (r_i.h / 3).max(0);
+            let max_w_inset = (r_i.size.w / 3).max(0);
+            let max_h_inset = (r_i.size.h / 3).max(0);
             let inset = raw_inset.min(max_w_inset).min(max_h_inset);
             self.entries[i].draw_rect = (
-                r_i.x + inset,
-                r_i.y + inset,
-                (r_i.w - inset * 2).max(1),
-                (r_i.h - inset * 2).max(1),
+                r_i.loc.x + inset,
+                r_i.loc.y + inset,
+                (r_i.size.w - inset * 2).max(1),
+                (r_i.size.h - inset * 2).max(1),
             );
         }
 
