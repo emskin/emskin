@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+# `cargo build` / `cargo run -p emskin` only rebuilds members in the target's
+# dep graph. emskin-bar is a sibling binary (not a dep) so it would stay
+# stale; include it here so the unqualified cargo commands always rebuild it
+# alongside emskin.
+default-members = ["crates/emskin", "crates/emskin-bar"]
 
 [workspace.package]
 version = "0.1.4"
