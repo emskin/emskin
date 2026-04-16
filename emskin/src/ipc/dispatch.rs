@@ -40,20 +40,17 @@ pub fn handle_ipc_message(state: &mut EmskinState, msg: IncomingMessage) {
         }
         IncomingMessage::SetMeasure { enabled } => {
             tracing::debug!("IPC set_measure enabled={enabled}");
-            state
-                .effect_chain
-                .dispatch_ipc("measure", &serde_json::json!({ "enabled": enabled }));
+            state.measure.borrow_mut().set_enabled(enabled);
         }
         IncomingMessage::SetSkeleton { enabled, rects } => {
             tracing::debug!("IPC set_skeleton enabled={enabled} rects={}", rects.len());
-            state.effect_chain.dispatch_ipc(
-                "skeleton",
-                &serde_json::json!({ "enabled": enabled, "rects": rects }),
-            );
-        }
-        IncomingMessage::PluginIpc { name, payload } => {
-            tracing::debug!("IPC plugin_ipc name={name}");
-            state.effect_chain.dispatch_ipc(&name, &payload);
+            let mut sk = state.skeleton.borrow_mut();
+            sk.set_enabled(enabled);
+            if enabled {
+                sk.set_rects(rects);
+            } else {
+                sk.clear();
+            }
         }
         IncomingMessage::SwitchWorkspace { workspace_id } => {
             tracing::debug!("IPC switch_workspace {workspace_id}");

@@ -199,9 +199,26 @@ pub struct EmskinState {
     /// Focus management state.
     pub focus: FocusState,
 
-    /// Registered overlays (measure / skeleton / splash / workspace_bar). Drives
-    /// per-frame paint + pointer/key dispatch via the `Effect` trait.
-    pub effect_chain: crate::effect::chain::EffectChain,
+    /// Registered overlays driven by effect-core's `EffectChain`.
+    pub effect_chain: effect_core::EffectChain,
+
+    /// Typed handles to each overlay — same instance is also registered in
+    /// `effect_chain` via `EffectHandle`. Lets window-manager code (input
+    /// routing, IPC dispatch, workspace-switch reset) call the overlay's
+    /// typed setters directly without going through the trait.
+    pub measure: std::rc::Rc<std::cell::RefCell<crate::measure::MeasureOverlay>>,
+    pub skeleton: std::rc::Rc<std::cell::RefCell<crate::skeleton::SkeletonOverlay>>,
+    pub splash: std::rc::Rc<std::cell::RefCell<crate::splash::SplashScreen>>,
+    pub workspace_bar: std::rc::Rc<std::cell::RefCell<crate::workspace_bar::WorkspaceBar>>,
+
+    /// Whether a skeleton label-click was swallowed — matching release must
+    /// also be swallowed. Lives in the window manager, not the overlay.
+    pub skeleton_click_absorbed: bool,
+
+    /// Edge-detect latch for "Emacs just connected" → triggers `splash.dismiss()`
+    /// exactly once. Initialised false; set to true the first frame Emacs's
+    /// surface is present.
+    pub last_emacs_connected: bool,
 
     /// Current cursor image status. For Named, the host cursor is used;
     /// for Surface (GTK3/Emacs), the cursor is software-rendered each frame.
@@ -258,6 +275,17 @@ impl EmskinState {
         let socket_name = Self::init_wayland_listener(display, event_loop)?;
 
         let loop_signal = event_loop.get_signal();
+
+        // Overlays: same instance shared between the typed handle kept on
+        // `EmskinState` (for input routing, IPC dispatch, workspace-switch
+        // reset) and the `EffectHandle` wrapper registered into the chain
+        // (for rendering). `register_overlay` does both in one step.
+        let mut effect_chain = effect_core::EffectChain::default();
+        let splash = register_overlay(&mut effect_chain, crate::splash::SplashScreen::new());
+        let workspace_bar =
+            register_overlay(&mut effect_chain, crate::workspace_bar::WorkspaceBar::new());
+        let skeleton = register_overlay(&mut effect_chain, crate::skeleton::SkeletonOverlay::new());
+        let measure = register_overlay(&mut effect_chain, crate::measure::MeasureOverlay::new());
 
         Ok(Self {
             start_time,
@@ -318,7 +346,13 @@ impl EmskinState {
             pending_command: None,
             selection: SelectionState::default(),
             focus: FocusState::default(),
-            effect_chain: build_effect_chain(),
+            effect_chain,
+            measure,
+            skeleton,
+            splash,
+            workspace_bar,
+            skeleton_click_absorbed: false,
+            last_emacs_connected: false,
             cursor_status: CursorImageStatus::default_named(),
             cursor_changed: false,
             needs_redraw: true,
@@ -518,7 +552,14 @@ impl EmskinState {
         self.focus.layer_saved_focus = None;
         self.focus.text_input_focus = None;
         self.focus.pending_ime_allowed = Some(false);
-        self.effect_chain.on_workspace_switch();
+        // Reset skeleton state for the new workspace (window manager drives this,
+        // not the effect trait).
+        {
+            let mut sk = self.skeleton.borrow_mut();
+            sk.set_enabled(false);
+            sk.clear();
+        }
+        self.skeleton_click_absorbed = false;
 
         if matches!(self.cursor_status, CursorImageStatus::Surface(_)) {
             self.cursor_status = CursorImageStatus::default_named();
@@ -716,23 +757,22 @@ impl ClientData for ClientState {
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
 }
 
-/// Construct the built-in effect chain. Order is irrelevant at registration time
-/// — `EffectChain::register` sorts by `chain_position` internally.
-fn build_effect_chain() -> crate::effect::chain::EffectChain {
-    let mut chain = crate::effect::chain::EffectChain::default();
-    chain.register(Box::new(crate::splash::SplashScreen::new()));
-    chain.register(Box::new(crate::workspace_bar::WorkspaceBar::new()));
-    chain.register(Box::new(crate::skeleton::SkeletonOverlay::new()));
-    chain.register(Box::new(crate::measure::MeasureOverlay::new()));
-    chain
+/// Register an overlay into the chain and return a typed handle to the same
+/// instance. Lets `EmskinState::new` construct each overlay with one line.
+fn register_overlay<T: effect_core::Effect + 'static>(
+    chain: &mut effect_core::EffectChain,
+    value: T,
+) -> std::rc::Rc<std::cell::RefCell<T>> {
+    let rc = std::rc::Rc::new(std::cell::RefCell::new(value));
+    chain.register(effect_core::EffectHandle::new(rc.clone()));
+    rc
 }
 
 impl EmskinState {
     /// Propagate the `--bar=none/builtin` CLI choice to both the geometry
-    /// calculator (`bar_height()`) and the registered `WorkspaceBar` effect.
+    /// calculator (`bar_height()`) and the registered `WorkspaceBar` overlay.
     pub fn set_bar_enabled(&mut self, enabled: bool) {
         self.bar_enabled = enabled;
-        self.effect_chain
-            .dispatch_ipc("workspace_bar", &serde_json::json!({ "enabled": enabled }));
+        self.workspace_bar.borrow_mut().set_enabled(enabled);
     }
 }

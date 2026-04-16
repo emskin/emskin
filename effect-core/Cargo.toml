@@ -1,0 +1,13 @@
+[package]
+name = "effect-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Effect trait + rendering pipeline for emskin"
+
+[dependencies]
+smithay.workspace = true
+cosmic-text.workspace = true
+serde.workspace = true

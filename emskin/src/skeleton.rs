@@ -193,6 +193,17 @@ impl SkeletonOverlay {
         self.entries.clear();
     }
 
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+        if !enabled {
+            self.click_absorbed = false;
+        }
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+
     /// Hit-test a logical cursor position against the panel label boxes.
     /// On hit: starts the target rect's flash effect and returns a clone
     /// of the corresponding SkeletonRect.
@@ -502,7 +513,7 @@ fn render_label(
     let buf_h = (inner_h + LABEL_PAD * 2).max(1);
 
     let buf_size: Size<i32, SBuffer> = (buf_w, buf_h).into();
-    crate::utils::paint_buffer(buf, buf_size, |data| {
+    effect_core::paint_buffer(buf, buf_size, |data| {
         let stride = buf_w * 4;
         data.chunks_exact_mut(4)
             .for_each(|c| c.copy_from_slice(&LABEL_BG));
@@ -551,7 +562,7 @@ fn render_label(
 // Effect impl
 // ---------------------------------------------------------------------------
 
-impl crate::effect::Effect for SkeletonOverlay {
+impl effect_core::Effect for SkeletonOverlay {
     fn name(&self) -> &'static str {
         "skeleton"
     }
@@ -567,9 +578,9 @@ impl crate::effect::Effect for SkeletonOverlay {
     fn paint(
         &mut self,
         renderer: &mut GlesRenderer,
-        ctx: &crate::effect::EffectCtx,
-    ) -> Vec<crate::winit::CustomElement<GlesRenderer>> {
-        use crate::winit::CustomElement;
+        ctx: &effect_core::EffectCtx,
+    ) -> Vec<effect_core::CustomElement<GlesRenderer>> {
+        use effect_core::CustomElement;
 
         let (solids, labels) = self.build_elements(renderer, ctx.output_size, ctx.scale);
 
@@ -582,77 +593,5 @@ impl crate::effect::Effect for SkeletonOverlay {
             out.push(CustomElement::Solid(solid));
         }
         out
-    }
-
-    fn on_workspace_switch(&mut self) {
-        self.clear();
-        self.enabled = false;
-        self.click_absorbed = false;
-    }
-
-    fn handle_ipc(&mut self, payload: &serde_json::Value) {
-        // Matches IncomingMessage::SetSkeleton { enabled, rects }.
-        let enabled = payload
-            .get("enabled")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        self.enabled = enabled;
-        if enabled {
-            let rects: Vec<crate::ipc::SkeletonRect> = payload
-                .get("rects")
-                .cloned()
-                .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or_default();
-            self.set_rects(rects);
-        } else {
-            self.clear();
-        }
-    }
-
-    fn handle_pointer_button(
-        &mut self,
-        ev: &crate::effect::PointerButtonEvent,
-        ctx: &mut crate::effect::EffectInputCtx<'_>,
-    ) -> crate::effect::EventResult {
-        use crate::effect::EventResult;
-        use smithay::backend::input::{ButtonState, MouseButton};
-
-        if ev.button != MouseButton::Left {
-            return EventResult::Pass;
-        }
-        match ev.state {
-            ButtonState::Pressed => {
-                if let Some(rect) = self.click_at(ev.pos) {
-                    tracing::debug!(
-                        "skeleton label click: kind={} label={:?} ({},{}) {}x{}",
-                        rect.kind,
-                        rect.label,
-                        rect.rect.x,
-                        rect.rect.y,
-                        rect.rect.w,
-                        rect.rect.h,
-                    );
-                    ctx.ipc.send(crate::ipc::OutgoingMessage::SkeletonClicked {
-                        kind: rect.kind,
-                        label: rect.label,
-                        rect: crate::ipc::IpcRect {
-                            x: rect.rect.x,
-                            y: rect.rect.y,
-                            w: rect.rect.w,
-                            h: rect.rect.h,
-                        },
-                    });
-                    self.click_absorbed = true;
-                    return EventResult::Consumed;
-                }
-            }
-            ButtonState::Released if self.click_absorbed => {
-                // Absorbed press was followed by its release; drop it.
-                self.click_absorbed = false;
-                return EventResult::Consumed;
-            }
-            _ => {}
-        }
-        EventResult::Pass
     }
 }

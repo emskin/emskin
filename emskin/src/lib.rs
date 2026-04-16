@@ -3,7 +3,6 @@ pub mod clipboard;
 pub mod clipboard_dispatch;
 pub mod clipboard_x11;
 pub mod cursor_x11;
-pub mod effect;
 pub mod handlers;
 pub mod input;
 pub mod ipc;

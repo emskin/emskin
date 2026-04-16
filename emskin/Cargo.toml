@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Nested Wayland compositor for Emacs"
 
 [dependencies]
+effect-core = { path = "../effect-core" }
 smithay.workspace = true
 cosmic-text.workspace = true
 serde.workspace = true

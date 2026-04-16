@@ -14,7 +14,7 @@ use smithay::{
     utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform},
 };
 
-use crate::utils::paint_buffer;
+use effect_core::paint_buffer;
 
 // ---------------------------------------------------------------------------
 // Embedded 5×7 bitmap font (column-major, bit 0 = top row)
@@ -400,15 +400,19 @@ impl MeasureOverlay {
 // Effect impl
 // ---------------------------------------------------------------------------
 
-impl crate::effect::Effect for MeasureOverlay {
+impl MeasureOverlay {
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+}
+
+impl effect_core::Effect for MeasureOverlay {
     fn name(&self) -> &'static str {
         "measure"
     }
-
     fn is_active(&self) -> bool {
         self.enabled
     }
-
     fn chain_position(&self) -> u8 {
         80
     }
@@ -416,9 +420,9 @@ impl crate::effect::Effect for MeasureOverlay {
     fn paint(
         &mut self,
         renderer: &mut GlesRenderer,
-        ctx: &crate::effect::EffectCtx,
-    ) -> Vec<crate::winit::CustomElement<GlesRenderer>> {
-        use crate::winit::CustomElement;
+        ctx: &effect_core::EffectCtx,
+    ) -> Vec<effect_core::CustomElement<GlesRenderer>> {
+        use effect_core::CustomElement;
 
         let Some(cursor) = ctx.cursor_pos else {
             return Vec::new();
@@ -439,11 +443,5 @@ impl crate::effect::Effect for MeasureOverlay {
             out.push(CustomElement::Label(ruler));
         }
         out
-    }
-
-    fn handle_ipc(&mut self, payload: &serde_json::Value) {
-        if let Some(enabled) = payload.get("enabled").and_then(|v| v.as_bool()) {
-            self.enabled = enabled;
-        }
     }
 }

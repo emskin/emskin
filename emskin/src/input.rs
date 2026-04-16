@@ -123,41 +123,39 @@ impl EmskinState {
                 let button = event.button_code();
                 let button_state = event.state();
 
-                // Effect chain first: skeleton / workspace_bar / etc. see the
-                // event before the normal pointer-focus path. Commands returned
-                // (e.g. SwitchWorkspace) execute after dispatch so effects
-                // never touch `&mut EmskinState` directly.
-                if let Some(button) = event.button() {
+                // Window-manager-owned overlay hit-testing. emskin drives these
+                // directly against the overlays' typed click methods — the
+                // Effect trait itself has no input hook.
+                if button_state == ButtonState::Pressed && event.button() == Some(MouseButton::Left)
+                {
                     let pos = pointer.current_location();
-                    let ev = crate::effect::PointerButtonEvent {
-                        button,
-                        state: button_state,
-                        pos,
-                        time_ms: event.time_msec(),
-                    };
-                    let mut commands = Vec::new();
-                    let result = {
-                        let mut ctx = crate::effect::EffectInputCtx {
-                            ipc: &mut self.ipc,
-                            commands: &mut commands,
-                        };
-                        self.effect_chain.dispatch_pointer_button(&ev, &mut ctx)
-                    };
-                    for cmd in commands {
-                        match cmd {
-                            crate::effect::EffectCommand::SwitchWorkspace(id) => {
-                                if id != self.active_workspace_id {
-                                    self.switch_workspace(id);
-                                }
-                            }
-                            crate::effect::EffectCommand::RequestRedraw => {
-                                self.needs_redraw = true;
-                            }
+
+                    // Workspace bar click → switch workspace. Scope the borrow
+                    // so `switch_workspace`'s `&mut self` isn't blocked by the
+                    // `Ref<'_, WorkspaceBar>` RAII guard.
+                    let bar_hit = self.workspace_bar.borrow().click_at(pos);
+                    if let Some(ws_id) = bar_hit {
+                        if ws_id != self.active_workspace_id {
+                            self.switch_workspace(ws_id);
                         }
-                    }
-                    if matches!(result, crate::effect::EventResult::Consumed) {
                         return;
                     }
+
+                    // Skeleton label click → flash only (no outbound IPC).
+                    // Scope the borrow so subsequent pointer-focus code can
+                    // still reborrow `self`.
+                    let skeleton_hit = {
+                        let mut sk = self.skeleton.borrow_mut();
+                        sk.enabled() && sk.click_at(pos).is_some()
+                    };
+                    if skeleton_hit {
+                        self.skeleton_click_absorbed = true;
+                        return;
+                    }
+                }
+                if button_state == ButtonState::Released && self.skeleton_click_absorbed {
+                    self.skeleton_click_absorbed = false;
+                    return;
                 }
 
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed() {

@@ -69,13 +69,6 @@ pub enum IncomingMessage {
     SwitchWorkspace {
         workspace_id: u64,
     },
-    /// Generic plugin / effect IPC. Forwarded to `EffectChain::dispatch_ipc`
-    /// which routes to the `Effect` whose `name()` matches. Payload semantics
-    /// are effect-specific.
-    PluginIpc {
-        name: String,
-        payload: serde_json::Value,
-    },
 }
 
 /// A single rectangle in the skeleton overlay. Emacs-side kinds currently

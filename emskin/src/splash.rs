@@ -480,9 +480,9 @@ fn render_text_buf(
     let bh = (th + PAD * 2).max(1);
 
     let buf_size: Size<i32, SBuffer> = (bw, bh).into();
-    crate::utils::paint_buffer(buf, buf_size, |data| {
+    effect_core::paint_buffer(buf, buf_size, |data| {
         data.fill(0);
-        crate::utils::draw_text_onto(data, bw, bh, PAD, PAD, fg, &mut ct, fs, cache);
+        effect_core::draw_text_onto(data, bw, bh, PAD, PAD, fg, &mut ct, fs, cache);
     });
     commit.increment();
 
@@ -512,7 +512,7 @@ fn ease_out_back(t: f32) -> f32 {
 // Effect impl
 // ---------------------------------------------------------------------------
 
-impl crate::effect::Effect for SplashScreen {
+impl effect_core::Effect for SplashScreen {
     fn name(&self) -> &'static str {
         "splash"
     }
@@ -525,19 +525,12 @@ impl crate::effect::Effect for SplashScreen {
         95
     }
 
-    fn pre_paint(&mut self, ctx: &crate::effect::EffectCtx) {
-        // Trigger dismiss when Emacs connects (was in winit.rs:221-235).
-        if ctx.emacs_connected && self.dismiss_time.is_none() {
-            self.dismiss();
-        }
-    }
-
     fn paint(
         &mut self,
         renderer: &mut GlesRenderer,
-        ctx: &crate::effect::EffectCtx,
-    ) -> Vec<crate::winit::CustomElement<GlesRenderer>> {
-        use crate::winit::CustomElement;
+        ctx: &effect_core::EffectCtx,
+    ) -> Vec<effect_core::CustomElement<GlesRenderer>> {
+        use effect_core::CustomElement;
 
         let (solids, labels) = self.build_elements(renderer, ctx.output_size, ctx.scale);
 

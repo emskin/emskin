@@ -6,16 +6,11 @@ use smithay::{
         renderer::{
             damage::OutputDamageTracker,
             element::{
-                memory::MemoryRenderBufferRenderElement,
-                render_elements,
-                solid::SolidColorRenderElement,
-                surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
-                texture::TextureRenderElement,
-                Id, Kind,
+                surface::render_elements_from_surface_tree, texture::TextureRenderElement, Id, Kind,
             },
             gles::{GlesRenderer, GlesTexture},
             utils::{import_surface_tree, RendererSurfaceStateUserData},
-            ImportAll, ImportMem, Renderer,
+            Renderer,
         },
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
@@ -29,20 +24,9 @@ use smithay::{
     wayland::{compositor::with_states, seat::WaylandFocus},
 };
 
+pub use effect_core::CustomElement;
+
 use crate::EmskinState;
-
-/// Blanket trait bundling renderer constraints for the `render_elements!` macro
-/// (which cannot parse associated-type bounds like `Renderer<TextureId = GlesTexture>`).
-trait EmskinRenderer: ImportAll + ImportMem + Renderer<TextureId = GlesTexture> {}
-impl<R: ImportAll + ImportMem + Renderer<TextureId = GlesTexture>> EmskinRenderer for R {}
-
-render_elements! {
-    pub CustomElement<R> where R: EmskinRenderer;
-    Surface=WaylandSurfaceRenderElement<R>,
-    Mirror=TextureRenderElement<GlesTexture>,
-    Solid=SolidColorRenderElement,
-    Label=MemoryRenderBufferRenderElement<R>,
-}
 
 const REFRESH_RATE: i32 = 60_000;
 
@@ -155,22 +139,25 @@ fn render_frame(
             return;
         };
 
-        // smithay's damage tracker renders elements via
-        // `render_elements.iter().rev()`, so **the first element in the vec
-        // is the topmost layer**. Layer order (top → bottom):
-        //   1. Software cursor
-        //   2. Splash screen (startup banner — fades out when Emacs connects)
-        //   3. Workspace bar
-        //   4. Skeleton labels / borders (debug overlay)
-        //   5. Measure overlay: cursor label + crosshair + rulers
-        //   6. Layer shell surfaces (Overlay → Top → Bottom → Background)
-        //   7. Mirror texture elements (popups → toplevel)
+        // emskin's responsibility: produce the per-frame snapshot data and
+        // feed it into `effect_core::render_workspace`. Effect-core owns the
+        // smithay `render_output` call and all damage-tracking bookkeeping.
         let scale = output.current_scale().fractional_scale();
-        let mut custom_elements: Vec<CustomElement<GlesRenderer>> = Vec::new();
         let output_size_log: Size<i32, Logical> = size.to_f64().to_logical(scale).to_i32_round();
 
-        // Software cursor: topmost layer. Used for Surface cursors (GTK3/Emacs)
-        // that can't be forwarded to the host via winit's CursorIcon API.
+        // Edge-detect Emacs connection and trigger `splash.dismiss` once.
+        let emacs_now = state.emacs_surface.is_some();
+        if emacs_now && !state.last_emacs_connected {
+            state.splash.borrow_mut().dismiss();
+        }
+        state.last_emacs_connected = emacs_now;
+
+        // Non-effect elements: software cursor, layer shell surfaces, window
+        // mirrors. emskin assembles these itself.
+        let mut extras: Vec<CustomElement<GlesRenderer>> = Vec::new();
+
+        // Software cursor (topmost of extras): used for Surface cursors
+        // (GTK3/Emacs) that can't be forwarded via winit's CursorIcon API.
         if let CursorImageStatus::Surface(ref surface) = state.cursor_status {
             if !surface.is_alive() {
                 state.cursor_status = CursorImageStatus::default_named();
@@ -196,7 +183,7 @@ fn render_frame(
                         };
                         let view = rss.view();
                         let pos = (cursor_pos - hotspot.to_f64()).to_physical(scale);
-                        custom_elements.push(
+                        extras.push(
                             TextureRenderElement::from_static_texture(
                                 Id::from_wayland_resource(surface),
                                 ctx.clone(),
@@ -217,61 +204,40 @@ fn render_frame(
             }
         }
 
-        // Overlays: run the Effect chain. Splash / workspace_bar / skeleton /
-        // measure all live here, ordered by their `chain_position` (topmost
-        // first in the Vec we append).
-        let ctx = crate::effect::EffectCtx {
-            cursor_pos: state.seat.get_pointer().map(|p| p.current_location()),
-            output_size: output_size_log,
-            scale,
-            emacs_connected: state.emacs_surface.is_some(),
-            active_workspace_id: state.active_workspace_id,
-            workspaces: state
-                .all_workspace_ids()
-                .into_iter()
-                .map(|id| {
-                    let name = if id == state.active_workspace_id {
-                        state.active_workspace_name.clone()
-                    } else {
-                        state
-                            .inactive_workspaces
-                            .get(&id)
-                            .map(|ws| ws.name.clone())
-                            .unwrap_or_default()
-                    };
-                    (id, name)
-                })
-                .collect(),
-            present_time: state.start_time.elapsed(),
-        };
-        state.effect_chain.pre_paint(&ctx);
-        custom_elements.extend(state.effect_chain.paint(renderer, &ctx));
-        if state.effect_chain.post_paint() {
-            state.needs_redraw = true;
-        }
-
-        // Layer surfaces: above mirrors, below debug overlays.
-        custom_elements.extend(build_layer_surface_elements(renderer, output, scale));
-
-        // Mirrors: bottom of the custom layer stack.
-        custom_elements.extend(crate::mirror_render::build_mirror_elements(
+        // Layer surfaces + mirrors stacked below the chain output but above
+        // the space's client windows.
+        extras.extend(build_layer_surface_elements(renderer, output, scale));
+        extras.extend(crate::mirror_render::build_mirror_elements(
             state, renderer, scale,
         ));
 
-        let render_scale = 1.0;
-        if let Err(e) = smithay::desktop::space::render_output::<_, CustomElement<GlesRenderer>, _, _>(
+        let effect_ctx = effect_core::EffectCtx {
+            cursor_pos: state.seat.get_pointer().map(|p| p.current_location()),
+            output_size: output_size_log,
+            scale,
+            present_time: state.start_time.elapsed(),
+        };
+
+        match effect_core::render_workspace(
             output,
             renderer,
             &mut framebuffer,
-            render_scale,
-            0,
-            [&state.space],
-            &custom_elements,
+            &state.space,
+            &mut state.effect_chain,
+            &effect_ctx,
+            extras,
             damage_tracker,
             [1.0, 1.0, 1.0, 1.0],
         ) {
-            tracing::error!("render_output failed: {e}");
-            return;
+            Ok(outcome) => {
+                if outcome.want_redraw {
+                    state.needs_redraw = true;
+                }
+            }
+            Err(e) => {
+                tracing::error!("render_workspace failed: {e}");
+                return;
+            }
         }
     }
 
