@@ -68,9 +68,11 @@ fn ipc_set_geometry(state: &mut EmskinState, window_id: u64, rect: crate::ipc::I
         tracing::warn!("IPC set_geometry: invalid size ({w}x{h}), ignoring");
         return;
     }
-    // IPC coordinates are relative to Emacs surface; offset by bar height.
-    let bar_h = state.bar_height();
-    let ay = y + bar_h;
+    // IPC coordinates are relative to Emacs surface. Translate by Emacs
+    // frame's current origin (non-zero when a layer surface reserves space
+    // at the top via `exclusive_zone`).
+    let origin_y = state.emacs_geometry().map_or(0, |g| g.loc.y);
+    let ay = y + origin_y;
     let new_geo = smithay::utils::Rectangle::new((x, ay).into(), (w, h).into());
     let Some(app) = state.apps.get_mut(window_id) else {
         return;
@@ -189,8 +191,8 @@ fn ipc_add_mirror(
         tracing::warn!("IPC add_mirror: invalid size ({w}x{h}), ignoring");
         return;
     }
-    let bar_h = state.bar_height();
-    let geo = smithay::utils::Rectangle::new((x, y + bar_h).into(), (w, h).into());
+    let origin_y = state.emacs_geometry().map_or(0, |g| g.loc.y);
+    let geo = smithay::utils::Rectangle::new((x, y + origin_y).into(), (w, h).into());
     let Some(app) = state.apps.get_mut(window_id) else {
         tracing::warn!("add_mirror: unknown window_id={window_id}");
         return;
@@ -218,8 +220,8 @@ fn ipc_update_mirror_geometry(
         tracing::warn!("IPC update_mirror_geometry: invalid size ({w}x{h}), ignoring");
         return;
     }
-    let bar_h = state.bar_height();
-    let geo = smithay::utils::Rectangle::new((x, y + bar_h).into(), (w, h).into());
+    let origin_y = state.emacs_geometry().map_or(0, |g| g.loc.y);
+    let geo = smithay::utils::Rectangle::new((x, y + origin_y).into(), (w, h).into());
     let Some(app) = state.apps.get_mut(window_id) else {
         return;
     };

@@ -130,17 +130,6 @@ impl EmskinState {
                 {
                     let pos = pointer.current_location();
 
-                    // Workspace bar click → switch workspace. Scope the borrow
-                    // so `switch_workspace`'s `&mut self` isn't blocked by the
-                    // `Ref<'_, WorkspaceBar>` RAII guard.
-                    let bar_hit = self.workspace_bar.borrow().click_at(pos);
-                    if let Some(ws_id) = bar_hit {
-                        if ws_id != self.active_workspace_id {
-                            self.switch_workspace(ws_id);
-                        }
-                        return;
-                    }
-
                     // Skeleton label click → flash only (no outbound IPC).
                     // Scope the borrow so subsequent pointer-focus code can
                     // still reborrow `self`.

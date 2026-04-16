@@ -247,12 +247,9 @@ fn refresh_workspace_state(state: &mut EmskinState) {
     }
     state.workspace_protocol.cleanup_dead();
 
-    if state.bar_enabled {
-        state
-            .workspace_bar
-            .borrow_mut()
-            .update(&ws_named, state.active_workspace_id);
-    }
+    // External workspace bar (emskin-bar) consumes ext-workspace-v1 directly;
+    // compositor no longer pushes workspace list into an internal overlay.
+    let _ = ws_named;
 }
 
 fn cleanup_dead_apps(state: &mut EmskinState) {

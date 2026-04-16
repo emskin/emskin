@@ -10,9 +10,11 @@
 //! - [`measure`] — Figma-style pixel inspector (crosshair + rulers)
 //! - [`skeleton`] — frame layout debug overlay (wireframes + clickable labels)
 //! - [`splash`] — startup animation, dismissed on Emacs connect
-//! - [`workspace_bar`] — top-of-screen pill bar for 2+ workspaces
+//!
+//! Workspace bar used to live here but was extracted into a standalone
+//! program (`crates/emskin-bar/`) that talks to the compositor via
+//! `zwlr-layer-shell-v1` + `ext-workspace-v1`.
 
 pub mod measure;
 pub mod skeleton;
 pub mod splash;
-pub mod workspace_bar;

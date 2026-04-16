@@ -135,11 +135,6 @@ pub struct EmskinState {
     pub pending_emacs_toplevels: Vec<(ToplevelSurface, Window)>,
     /// ext-workspace-v1 protocol state.
     pub workspace_protocol: crate::protocols::workspace::WorkspaceProtocolState,
-    /// Whether the built-in workspace bar is enabled (--bar=builtin).
-    /// Controls whether `WorkspaceBar` is registered in `effect_chain` and
-    /// gates `bar_height()` (which reserves vertical space for the bar above
-    /// the Emacs frame).
-    pub bar_enabled: bool,
 
     pub loop_signal: LoopSignal,
     pub loop_handle: LoopHandle<'static, EmskinState>,
@@ -209,7 +204,6 @@ pub struct EmskinState {
     pub measure: std::rc::Rc<std::cell::RefCell<effect_plugins::measure::MeasureOverlay>>,
     pub skeleton: std::rc::Rc<std::cell::RefCell<effect_plugins::skeleton::SkeletonOverlay>>,
     pub splash: std::rc::Rc<std::cell::RefCell<effect_plugins::splash::SplashScreen>>,
-    pub workspace_bar: std::rc::Rc<std::cell::RefCell<effect_plugins::workspace_bar::WorkspaceBar>>,
 
     /// Whether a skeleton label-click was swallowed — matching release must
     /// also be swallowed. Lives in the window manager, not the overlay.
@@ -285,10 +279,6 @@ impl EmskinState {
             &mut effect_chain,
             effect_plugins::splash::SplashScreen::new(),
         );
-        let workspace_bar = register_overlay(
-            &mut effect_chain,
-            effect_plugins::workspace_bar::WorkspaceBar::new(),
-        );
         let skeleton = register_overlay(
             &mut effect_chain,
             effect_plugins::skeleton::SkeletonOverlay::new(),
@@ -312,7 +302,6 @@ impl EmskinState {
             next_workspace_id: 2,
             pending_emacs_toplevels: Vec::new(),
             workspace_protocol,
-            bar_enabled: true,
 
             loop_signal,
             loop_handle,
@@ -361,7 +350,6 @@ impl EmskinState {
             measure,
             skeleton,
             splash,
-            workspace_bar,
             skeleton_click_absorbed: false,
             last_emacs_connected: false,
             cursor_status: CursorImageStatus::default_named(),
@@ -424,23 +412,26 @@ impl EmskinState {
         Some(Rectangle::new((0, 0).into(), logical))
     }
 
-    /// Workspace bar height (only when 2+ workspaces and bar enabled).
-    pub fn bar_height(&self) -> i32 {
-        if self.bar_enabled && self.workspace_count() > 1 {
-            effect_plugins::workspace_bar::BAR_HEIGHT
-        } else {
-            0
-        }
+    /// Rect available for tiled clients (Emacs) after subtracting exclusive
+    /// zones of anchored layer surfaces (e.g. the external workspace bar).
+    /// Delegates to smithay's `LayerMap::non_exclusive_zone()`; falls back to
+    /// full output when no layers or no output.
+    pub fn usable_area(&self) -> Rectangle<i32, Logical> {
+        let Some(output) = self.space.outputs().next() else {
+            return Rectangle::default();
+        };
+        smithay::desktop::layer_map_for_output(output).non_exclusive_zone()
     }
 
-    /// Geometry for Emacs frame (accounts for workspace bar height).
-    /// Returns (x=0, y=bar_height, w=output_w, h=output_h - bar_height).
+    /// Geometry for Emacs frame — fills the non-exclusive zone.
+    ///
+    /// Returns `None` only when there's no output. Otherwise returns whatever
+    /// `LayerMap` reports as the tiled-client region; external bars can claim
+    /// space by setting `exclusive_zone` on their layer surfaces and the
+    /// geometry adjusts automatically.
     pub fn emacs_geometry(&self) -> Option<Rectangle<i32, Logical>> {
-        let mut geo = self.output_fullscreen_geo()?;
-        let bar_h = self.bar_height();
-        geo.loc.y = bar_h;
-        geo.size.h -= bar_h;
-        Some(geo)
+        self.space.outputs().next()?;
+        Some(self.usable_area())
     }
 
     /// Migrate an app to the active workspace if it's in a different one.
@@ -777,13 +768,4 @@ fn register_overlay<T: effect_core::Effect + 'static>(
     let rc = std::rc::Rc::new(std::cell::RefCell::new(value));
     chain.register(effect_core::EffectHandle::new(rc.clone()));
     rc
-}
-
-impl EmskinState {
-    /// Propagate the `--bar=none/builtin` CLI choice to both the geometry
-    /// calculator (`bar_height()`) and the registered `WorkspaceBar` overlay.
-    pub fn set_bar_enabled(&mut self, enabled: bool) {
-        self.bar_enabled = enabled;
-        self.workspace_bar.borrow_mut().set_enabled(enabled);
-    }
 }

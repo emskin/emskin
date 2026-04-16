@@ -46,10 +46,6 @@ struct Cli {
     /// Standalone mode: auto-load built-in elisp without user config.
     #[arg(long)]
     standalone: bool,
-
-    /// Workspace bar mode: "builtin" (default) or "none".
-    #[arg(long, default_value = "builtin")]
-    bar: String,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -99,15 +95,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Open a Wayland/X11 window for our nested compositor
     emskin::winit::init_winit(&mut event_loop, &mut state)?;
-
-    match cli.bar.as_str() {
-        "builtin" | "none" => {}
-        other => {
-            eprintln!("Unknown --bar value '{other}', expected 'builtin' or 'none'");
-            std::process::exit(1);
-        }
-    }
-    state.set_bar_enabled(cli.bar != "none");
 
     if !cli.no_spawn {
         state.pending_command = Some(state::PendingCommand {
