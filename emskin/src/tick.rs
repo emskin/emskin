@@ -247,11 +247,9 @@ fn refresh_workspace_state(state: &mut EmskinState) {
     }
     state.workspace_protocol.cleanup_dead();
 
-    if state.bar_enabled {
-        state
-            .workspace_bar
-            .update(&ws_named, state.active_workspace_id);
-    }
+    // WorkspaceBar pulls workspace list from `EffectCtx` in its `pre_paint`
+    // — no side-channel update needed here.
+    let _ = ws_named;
 }
 
 fn cleanup_dead_apps(state: &mut EmskinState) {

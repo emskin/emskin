@@ -136,9 +136,10 @@ pub struct EmskinState {
     /// ext-workspace-v1 protocol state.
     pub workspace_protocol: crate::protocols::workspace::WorkspaceProtocolState,
     /// Whether the built-in workspace bar is enabled (--bar=builtin).
+    /// Controls whether `WorkspaceBar` is registered in `effect_chain` and
+    /// gates `bar_height()` (which reserves vertical space for the bar above
+    /// the Emacs frame).
     pub bar_enabled: bool,
-    /// Built-in workspace bar renderer.
-    pub workspace_bar: crate::workspace_bar::WorkspaceBar,
 
     pub loop_signal: LoopSignal,
     pub loop_handle: LoopHandle<'static, EmskinState>,
@@ -198,16 +199,9 @@ pub struct EmskinState {
     /// Focus management state.
     pub focus: FocusState,
 
-    /// Measure overlay: crosshair + rulers, Figma-style pixel inspector.
-    pub measure: crate::measure::MeasureOverlay,
-
-    /// Skeleton overlay (frame layout inspector).
-    pub skeleton: crate::skeleton::SkeletonOverlay,
-
-    /// Set to true when a left-button press was swallowed by a skeleton
-    /// label hit-test. The matching release must also be swallowed so the
-    /// downstream surface never sees an unpaired release.
-    pub skeleton_click_absorbed: bool,
+    /// Registered overlays (measure / skeleton / splash / workspace_bar). Drives
+    /// per-frame paint + pointer/key dispatch via the `Effect` trait.
+    pub effect_chain: crate::effect::chain::EffectChain,
 
     /// Current cursor image status. For Named, the host cursor is used;
     /// for Surface (GTK3/Emacs), the cursor is software-rendered each frame.
@@ -219,9 +213,6 @@ pub struct EmskinState {
     /// workspace switch) that smithay's per-element OutputDamageTracker does
     /// not cover.  When true the next Redraw calls render_frame; cleared after.
     pub needs_redraw: bool,
-
-    /// Startup splash screen (logo + animation), dismissed on Emacs connect.
-    pub splash: crate::splash::SplashScreen,
 }
 
 impl EmskinState {
@@ -283,7 +274,6 @@ impl EmskinState {
             pending_emacs_toplevels: Vec::new(),
             workspace_protocol,
             bar_enabled: true,
-            workspace_bar: crate::workspace_bar::WorkspaceBar::new(),
 
             loop_signal,
             loop_handle,
@@ -328,13 +318,10 @@ impl EmskinState {
             pending_command: None,
             selection: SelectionState::default(),
             focus: FocusState::default(),
-            measure: crate::measure::MeasureOverlay::new(),
-            skeleton: crate::skeleton::SkeletonOverlay::new(),
-            skeleton_click_absorbed: false,
+            effect_chain: build_effect_chain(),
             cursor_status: CursorImageStatus::default_named(),
             cursor_changed: false,
             needs_redraw: true,
-            splash: crate::splash::SplashScreen::new(),
         })
     }
 
@@ -531,9 +518,7 @@ impl EmskinState {
         self.focus.layer_saved_focus = None;
         self.focus.text_input_focus = None;
         self.focus.pending_ime_allowed = Some(false);
-        self.skeleton.clear();
-        self.skeleton.enabled = false;
-        self.skeleton_click_absorbed = false;
+        self.effect_chain.on_workspace_switch();
 
         if matches!(self.cursor_status, CursorImageStatus::Surface(_)) {
             self.cursor_status = CursorImageStatus::default_named();
@@ -729,4 +714,25 @@ pub struct ClientState {
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+}
+
+/// Construct the built-in effect chain. Order is irrelevant at registration time
+/// — `EffectChain::register` sorts by `chain_position` internally.
+fn build_effect_chain() -> crate::effect::chain::EffectChain {
+    let mut chain = crate::effect::chain::EffectChain::default();
+    chain.register(Box::new(crate::splash::SplashScreen::new()));
+    chain.register(Box::new(crate::workspace_bar::WorkspaceBar::new()));
+    chain.register(Box::new(crate::skeleton::SkeletonOverlay::new()));
+    chain.register(Box::new(crate::measure::MeasureOverlay::new()));
+    chain
+}
+
+impl EmskinState {
+    /// Propagate the `--bar=none/builtin` CLI choice to both the geometry
+    /// calculator (`bar_height()`) and the registered `WorkspaceBar` effect.
+    pub fn set_bar_enabled(&mut self, enabled: bool) {
+        self.bar_enabled = enabled;
+        self.effect_chain
+            .dispatch_ipc("workspace_bar", &serde_json::json!({ "enabled": enabled }));
+    }
 }

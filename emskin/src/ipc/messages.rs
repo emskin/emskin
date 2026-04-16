@@ -69,6 +69,13 @@ pub enum IncomingMessage {
     SwitchWorkspace {
         workspace_id: u64,
     },
+    /// Generic plugin / effect IPC. Forwarded to `EffectChain::dispatch_ipc`
+    /// which routes to the `Effect` whose `name()` matches. Payload semantics
+    /// are effect-specific.
+    PluginIpc {
+        name: String,
+        payload: serde_json::Value,
+    },
 }
 
 /// A single rectangle in the skeleton overlay. Emacs-side kinds currently
@@ -76,7 +83,7 @@ pub enum IncomingMessage {
 /// "header-line", "mode-line", "echo-area". Any unknown kind renders with
 /// the default color. `label` is an optional extra description — for
 /// "window" kind it carries the buffer name.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SkeletonRect {
     pub kind: String,
     #[serde(default)]

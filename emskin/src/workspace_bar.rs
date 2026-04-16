@@ -81,6 +81,9 @@ impl BarButton {
 }
 
 pub struct WorkspaceBar {
+    /// Toggled by `--bar=none` at startup via `set_bar_enabled` IPC. When
+    /// `false`, `is_active()` returns `false` and the bar never paints.
+    enabled: bool,
     font_system: Option<FontSystem>,
     swash_cache: SwashCache,
     buttons: Vec<BarButton>,
@@ -104,6 +107,7 @@ impl Default for WorkspaceBar {
 impl WorkspaceBar {
     pub fn new() -> Self {
         Self {
+            enabled: true,
             font_system: None,
             swash_cache: SwashCache::new(),
             buttons: Vec::new(),
@@ -470,4 +474,86 @@ fn rounded_rect_coverage(px: f32, py: f32, w: f32, h: f32, r: f32) -> f32 {
     let inside_dist = dx.max(dy).min(0.0);
     let dist = outside_dist + inside_dist - r;
     (0.5 - dist).clamp(0.0, 1.0)
+}
+
+// ---------------------------------------------------------------------------
+// Effect impl
+// ---------------------------------------------------------------------------
+
+impl crate::effect::Effect for WorkspaceBar {
+    fn name(&self) -> &'static str {
+        "workspace_bar"
+    }
+
+    fn is_active(&self) -> bool {
+        // Not `enabled && visible()`: `visible()` depends on `buttons` being
+        // populated, but `buttons` is only filled by `update()` inside
+        // `pre_paint` — gating pre_paint on visibility is a deadlock. Always
+        // run pre_paint when enabled; `paint()` (via `build_elements`) already
+        // emits an empty vec when `!visible()`.
+        self.enabled
+    }
+
+    fn chain_position(&self) -> u8 {
+        90
+    }
+
+    fn handle_ipc(&mut self, payload: &serde_json::Value) {
+        if let Some(enabled) = payload.get("enabled").and_then(|v| v.as_bool()) {
+            self.enabled = enabled;
+        }
+    }
+
+    fn pre_paint(&mut self, ctx: &crate::effect::EffectCtx) {
+        // Pull the latest workspace list into pill buttons. Internal change
+        // detection in `update()` makes this cheap when nothing changed.
+        let workspaces: Vec<(u64, &str)> = ctx
+            .workspaces
+            .iter()
+            .map(|(id, name)| (*id, name.as_str()))
+            .collect();
+        self.update(&workspaces, ctx.active_workspace_id);
+    }
+
+    fn paint(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        ctx: &crate::effect::EffectCtx,
+    ) -> Vec<crate::winit::CustomElement<GlesRenderer>> {
+        use crate::winit::CustomElement;
+
+        let (solids, labels) = self.build_elements(renderer, ctx.output_size, ctx.scale);
+
+        // Intra-effect z-order: labels (pill text) → solids (pill bg + bar bg).
+        let mut out = Vec::with_capacity(solids.len() + labels.len());
+        for label in labels {
+            out.push(CustomElement::Label(label));
+        }
+        for solid in solids {
+            out.push(CustomElement::Solid(solid));
+        }
+        out
+    }
+
+    fn handle_pointer_button(
+        &mut self,
+        ev: &crate::effect::PointerButtonEvent,
+        ctx: &mut crate::effect::EffectInputCtx<'_>,
+    ) -> crate::effect::EventResult {
+        use crate::effect::{EffectCommand, EventResult};
+        use smithay::backend::input::{ButtonState, MouseButton};
+
+        if ev.button != MouseButton::Left || ev.state != ButtonState::Pressed {
+            return EventResult::Pass;
+        }
+        if let Some(ws_id) = self.click_at(ev.pos) {
+            tracing::info!("bar click → workspace {ws_id}");
+            // `switch_workspace` inside EmskinState sends WorkspaceSwitched itself,
+            // so we only request the state mutation here — kills the double-send
+            // that existed at input.rs:178-183 + state.rs:548.
+            ctx.commands.push(EffectCommand::SwitchWorkspace(ws_id));
+            return EventResult::Consumed;
+        }
+        EventResult::Pass
+    }
 }

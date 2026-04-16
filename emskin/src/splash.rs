@@ -507,3 +507,58 @@ fn ease_out_back(t: f32) -> f32 {
     let c3 = c1 + 1.0;
     1.0 + c3 * (t - 1.0).powi(3) + c1 * (t - 1.0).powi(2)
 }
+
+// ---------------------------------------------------------------------------
+// Effect impl
+// ---------------------------------------------------------------------------
+
+impl crate::effect::Effect for SplashScreen {
+    fn name(&self) -> &'static str {
+        "splash"
+    }
+
+    fn is_active(&self) -> bool {
+        !self.done
+    }
+
+    fn chain_position(&self) -> u8 {
+        95
+    }
+
+    fn pre_paint(&mut self, ctx: &crate::effect::EffectCtx) {
+        // Trigger dismiss when Emacs connects (was in winit.rs:221-235).
+        if ctx.emacs_connected && self.dismiss_time.is_none() {
+            self.dismiss();
+        }
+    }
+
+    fn paint(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        ctx: &crate::effect::EffectCtx,
+    ) -> Vec<crate::winit::CustomElement<GlesRenderer>> {
+        use crate::winit::CustomElement;
+
+        let (solids, labels) = self.build_elements(renderer, ctx.output_size, ctx.scale);
+
+        // Intra-effect z-order: labels (topmost, letter bitmaps) → solids (bar/line).
+        let mut out = Vec::with_capacity(solids.len() + labels.len());
+        for label in labels {
+            out.push(CustomElement::Label(label));
+        }
+        for solid in solids {
+            out.push(CustomElement::Solid(solid));
+        }
+        out
+    }
+
+    fn post_paint(&mut self) -> bool {
+        // Request another frame while animating — matches the `needs_redraw = true`
+        // previously set unconditionally in winit.rs:469 for splash.
+        !self.done
+    }
+
+    fn should_remove(&self) -> bool {
+        self.done
+    }
+}

@@ -217,66 +217,37 @@ fn render_frame(
             }
         }
 
-        // Splash screen: above all compositor content, below cursor.
-        if !state.splash.is_done() {
-            if state.emacs_surface.is_some() {
-                state.splash.dismiss();
-            }
-            let (splash_solids, splash_labels) =
-                state
-                    .splash
-                    .build_elements(renderer, output_size_log, scale);
-            for l in splash_labels {
-                custom_elements.push(l.into());
-            }
-            for s in splash_solids {
-                custom_elements.push(s.into());
-            }
-        }
-
-        // Workspace bar: absolute topmost layer (above skeleton).
-        if state.bar_enabled && state.workspace_bar.visible() {
-            let (bar_solids, bar_labels) =
-                state
-                    .workspace_bar
-                    .build_elements(renderer, output_size_log, scale);
-            for l in bar_labels {
-                custom_elements.push(l.into());
-            }
-            for s in bar_solids {
-                custom_elements.push(s.into());
-            }
-        }
-
-        // Skeleton: topmost debug overlay. Push labels first, borders second, so labels
-        // end up above borders within the skeleton layer group.
-        let (skel_solids, skel_labels) =
-            state
-                .skeleton
-                .build_elements(renderer, output_size_log, scale);
-        for l in skel_labels {
-            custom_elements.push(l.into());
-        }
-        for s in skel_solids {
-            custom_elements.push(s.into());
-        }
-
-        // Measure overlay: above layer surfaces, below skeleton.
-        // Order: cursor label (top) → crosshair lines → rulers (bottom).
-        if let Some(pointer) = state.seat.get_pointer() {
-            let cursor = pointer.current_location();
-            let elements = state
-                .measure
-                .build_elements(renderer, cursor, output_size_log, scale);
-            if let Some(l) = elements.cursor_label {
-                custom_elements.push(l.into());
-            }
-            for s in elements.lines {
-                custom_elements.push(s.into());
-            }
-            for r in elements.rulers {
-                custom_elements.push(r.into());
-            }
+        // Overlays: run the Effect chain. Splash / workspace_bar / skeleton /
+        // measure all live here, ordered by their `chain_position` (topmost
+        // first in the Vec we append).
+        let ctx = crate::effect::EffectCtx {
+            cursor_pos: state.seat.get_pointer().map(|p| p.current_location()),
+            output_size: output_size_log,
+            scale,
+            emacs_connected: state.emacs_surface.is_some(),
+            active_workspace_id: state.active_workspace_id,
+            workspaces: state
+                .all_workspace_ids()
+                .into_iter()
+                .map(|id| {
+                    let name = if id == state.active_workspace_id {
+                        state.active_workspace_name.clone()
+                    } else {
+                        state
+                            .inactive_workspaces
+                            .get(&id)
+                            .map(|ws| ws.name.clone())
+                            .unwrap_or_default()
+                    };
+                    (id, name)
+                })
+                .collect(),
+            present_time: state.start_time.elapsed(),
+        };
+        state.effect_chain.pre_paint(&ctx);
+        custom_elements.extend(state.effect_chain.paint(renderer, &ctx));
+        if state.effect_chain.post_paint() {
+            state.needs_redraw = true;
         }
 
         // Layer surfaces: above mirrors, below debug overlays.
@@ -464,13 +435,11 @@ pub fn init_winit(
 
                 WinitEvent::Redraw => {
                     apply_pending_state(state, &mut backend);
-                    // Keep rendering every frame during splash animation.
-                    if !state.splash.is_done() {
-                        state.needs_redraw = true;
-                    }
+                    // Clear needs_redraw BEFORE render_frame so `Effect::post_paint`
+                    // (splash animation) can re-arm it for the next frame.
                     if state.needs_redraw {
-                        render_frame(state, &mut backend, &output, &mut damage_tracker);
                         state.needs_redraw = false;
+                        render_frame(state, &mut backend, &output, &mut damage_tracker);
                     }
                     post_render(state, &output);
                     backend.window().request_redraw();

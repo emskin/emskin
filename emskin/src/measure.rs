@@ -395,3 +395,55 @@ impl MeasureOverlay {
         });
     }
 }
+
+// ---------------------------------------------------------------------------
+// Effect impl
+// ---------------------------------------------------------------------------
+
+impl crate::effect::Effect for MeasureOverlay {
+    fn name(&self) -> &'static str {
+        "measure"
+    }
+
+    fn is_active(&self) -> bool {
+        self.enabled
+    }
+
+    fn chain_position(&self) -> u8 {
+        80
+    }
+
+    fn paint(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        ctx: &crate::effect::EffectCtx,
+    ) -> Vec<crate::winit::CustomElement<GlesRenderer>> {
+        use crate::winit::CustomElement;
+
+        let Some(cursor) = ctx.cursor_pos else {
+            return Vec::new();
+        };
+        let elements = self.build_elements(renderer, cursor, ctx.output_size, ctx.scale);
+
+        // Intra-effect z-order: cursor_label → lines → rulers (topmost → bottom).
+        let mut out = Vec::with_capacity(
+            elements.lines.len() + elements.rulers.len() + elements.cursor_label.is_some() as usize,
+        );
+        if let Some(label) = elements.cursor_label {
+            out.push(CustomElement::Label(label));
+        }
+        for line in elements.lines {
+            out.push(CustomElement::Solid(line));
+        }
+        for ruler in elements.rulers {
+            out.push(CustomElement::Label(ruler));
+        }
+        out
+    }
+
+    fn handle_ipc(&mut self, payload: &serde_json::Value) {
+        if let Some(enabled) = payload.get("enabled").and_then(|v| v.as_bool()) {
+            self.enabled = enabled;
+        }
+    }
+}

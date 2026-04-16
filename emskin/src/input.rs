@@ -123,64 +123,39 @@ impl EmskinState {
                 let button = event.button_code();
                 let button_state = event.state();
 
-                // Skeleton panel click interception. Left-button press on
-                // a visible label → flash the target rect, send
-                // SkeletonClicked IPC, and swallow both the press and its
-                // paired release so the downstream surface sees no click.
-                if event.button() == Some(MouseButton::Left) {
-                    if button_state == ButtonState::Pressed {
-                        let pos = pointer.current_location();
-                        if let Some(rect) = self.skeleton.click_at(pos) {
-                            tracing::debug!(
-                                "skeleton label click: kind={} label={:?} ({},{}) {}x{}",
-                                rect.kind,
-                                rect.label,
-                                rect.rect.x,
-                                rect.rect.y,
-                                rect.rect.w,
-                                rect.rect.h,
-                            );
-                            self.ipc.send(crate::ipc::OutgoingMessage::SkeletonClicked {
-                                kind: rect.kind,
-                                label: rect.label,
-                                rect: crate::ipc::IpcRect {
-                                    x: rect.rect.x,
-                                    y: rect.rect.y,
-                                    w: rect.rect.w,
-                                    h: rect.rect.h,
-                                },
-                            });
-                            self.skeleton_click_absorbed = true;
-                            return;
-                        }
-                    } else if self.skeleton_click_absorbed {
-                        // Absorbed press was followed by its release; drop it.
-                        self.skeleton_click_absorbed = false;
-                        return;
-                    }
-                }
-
-                // Workspace bar: click on a button → switch workspace.
-                if event.button() == Some(MouseButton::Left)
-                    && button_state == ButtonState::Pressed
-                    && self.bar_enabled
-                {
+                // Effect chain first: skeleton / workspace_bar / etc. see the
+                // event before the normal pointer-focus path. Commands returned
+                // (e.g. SwitchWorkspace) execute after dispatch so effects
+                // never touch `&mut EmskinState` directly.
+                if let Some(button) = event.button() {
                     let pos = pointer.current_location();
-                    tracing::debug!(
-                        "bar click check: pos=({:.0},{:.0}) visible={} buttons={}",
-                        pos.x,
-                        pos.y,
-                        self.workspace_bar.visible(),
-                        self.workspace_bar.button_count(),
-                    );
-                    if let Some(ws_id) = self.workspace_bar.click_at(pos) {
-                        tracing::info!("bar click → workspace {ws_id}");
-                        if ws_id != self.active_workspace_id && self.switch_workspace(ws_id) {
-                            self.ipc
-                                .send(crate::ipc::OutgoingMessage::WorkspaceSwitched {
-                                    workspace_id: ws_id,
-                                });
+                    let ev = crate::effect::PointerButtonEvent {
+                        button,
+                        state: button_state,
+                        pos,
+                        time_ms: event.time_msec(),
+                    };
+                    let mut commands = Vec::new();
+                    let result = {
+                        let mut ctx = crate::effect::EffectInputCtx {
+                            ipc: &mut self.ipc,
+                            commands: &mut commands,
+                        };
+                        self.effect_chain.dispatch_pointer_button(&ev, &mut ctx)
+                    };
+                    for cmd in commands {
+                        match cmd {
+                            crate::effect::EffectCommand::SwitchWorkspace(id) => {
+                                if id != self.active_workspace_id {
+                                    self.switch_workspace(id);
+                                }
+                            }
+                            crate::effect::EffectCommand::RequestRedraw => {
+                                self.needs_redraw = true;
+                            }
                         }
+                    }
+                    if matches!(result, crate::effect::EventResult::Consumed) {
                         return;
                     }
                 }

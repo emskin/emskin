@@ -107,7 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(1);
         }
     }
-    state.bar_enabled = cli.bar != "none";
+    state.set_bar_enabled(cli.bar != "none");
 
     if !cli.no_spawn {
         state.pending_command = Some(state::PendingCommand {
