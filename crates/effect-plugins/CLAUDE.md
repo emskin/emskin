@@ -39,6 +39,13 @@ Startup animation (letters + underline bar). Dismissed when Emacs connects.
 - `impl Effect::post_paint` returns `!done` to drive continuous redraws during animation
 - `should_remove = done` — chain drops the plugin after animation finishes
 
+### `cursor_trail` — chain_position 75
+
+Elastic trailing animation: 10 spring-damped nodes follow the cursor in a chain. Stretches on fast movement, bounces back when stopped.
+
+- `pub fn set_enabled(bool)` — toggle (called from `IncomingMessage::SetCursorTrail`)
+- `impl Effect` reads `ctx.cursor_pos` + `ctx.present_time` to step physics; `post_paint` returns `!settled` to keep redrawing during settle
+
 The workspace bar used to live here. It was extracted into a standalone Wayland client (`crates/emskin-bar/`) that talks to the compositor via `zwlr-layer-shell-v1` + `ext-workspace-v1` — effect-plugins no longer carries workspace semantics.
 
 ## Canvas-only drawing
@@ -51,6 +58,7 @@ Every plugin paints **only within** `ctx.canvas` (an `Rectangle<i32, Logical>` e
 - `measure::is_active` = `self.enabled`
 - `skeleton::is_active` = `self.enabled`
 - `splash::is_active` = `!self.done`
+- `cursor_trail::is_active` = `self.enabled`
 
 ## Adding a new plugin
 

@@ -53,6 +53,7 @@ The built-in overlays:
 - `measure` — crosshair + rulers (pixel inspector)
 - `skeleton` — wireframe debug overlay with clickable labels
 - `splash` — startup animation
+- `cursor_trail` — elastic trailing animation behind the pointer (spring-damper physics)
 
 Each plugin struct implements `effect_core::Effect` (purely visual) **and** exposes typed `pub` methods (`set_enabled`, `set_rects`, `click_at`, `dismiss`, `update`, …) that the host uses for control.
 
@@ -71,11 +72,12 @@ Standalone Wayland client binary. Anchors a `zwlr-layer-shell-v1` surface at the
 
 ## `chain_position` assignments
 
-| overlay    | position | rationale |
-|------------|----------|-----------|
-| `splash`   | 95       | Covers everything during startup |
-| `skeleton` | 85       | Debug overlay with labels |
-| `measure`  | 80       | Cursor measurement, visible when toggled |
+| overlay        | position | rationale |
+|----------------|----------|-----------|
+| `splash`       | 95       | Covers everything during startup |
+| `skeleton`     | 85       | Debug overlay with labels |
+| `measure`      | 80       | Cursor measurement, visible when toggled |
+| `cursor_trail` | 75       | Elastic trailing animation behind pointer |
 
 Effects with higher positions appear earlier in the custom-element Vec (which is the topmost slot in smithay's render stack).
 

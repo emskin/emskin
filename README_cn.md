@@ -95,6 +95,13 @@ M-x emskin-open-native-app RET foot
 - `C-x 5 o` — 切换工作区
 - `C-x 5 0` — 关闭当前工作区
 
+当存在两个及以上工作区时，顶部会自动出现一个工作区栏（`emskin-bar`），
+回到单工作区时自动消失。通过 `--bar=<模式>` 控制：
+
+- `--bar=auto` *(默认)* — 自动查找 `emskin-bar`
+- `--bar=none` — 不启动栏（如自行运行 waybar）
+- `--bar=/路径` — 使用自定义程序（任何支持 `zwlr-layer-shell-v1 + ext-workspace-v1` 的 bar）
+
 ### 使用启动器
 
 绑定快捷键启动 zofi / rofi 等启动器：
@@ -136,7 +143,7 @@ emskin [OPTIONS]
   --no-spawn              不启动 Emacs，等待外部连接
   --command <CMD>         启动命令 (默认: "emacs")
   --arg <ARG>             命令参数 (可多次指定)
-  --bar <MODE>            工作区栏: "builtin" (默认) 或 "none"
+  --bar <MODE>            工作区栏: "auto" (默认)、"none" 或自定义路径
   --xkb-layout <LAYOUT>   键盘布局 (例: "us", "cn")
 ```
 

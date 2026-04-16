@@ -149,7 +149,7 @@ emskin [OPTIONS]
   --no-spawn              Don't start Emacs; wait for external connection
   --command <CMD>         Program to launch (default: "emacs")
   --arg <ARG>             Arguments for --command (repeatable)
-  --bar <MODE>            Workspace bar: "builtin" (default) or "none"
+  --bar <MODE>            Workspace bar: "auto" (default), "none", or a path
   --xkb-layout <LAYOUT>   Keyboard layout (e.g. "us", "cn")
 ```
 
