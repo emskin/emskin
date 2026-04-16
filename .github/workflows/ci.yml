@@ -49,8 +49,8 @@ jobs:
             libfontconfig1-dev \
             libfreetype-dev
 
-      - name: Install Rust toolchain (from emskin/rust-toolchain.toml)
-        working-directory: emskin
+      - name: Install Rust toolchain (from crates/emskin/rust-toolchain.toml)
+        working-directory: crates/emskin
         run: rustup show
 
       - name: Cache cargo
@@ -59,18 +59,15 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            emskin/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('emskin/Cargo.lock', 'emskin/Cargo.toml') }}
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/*/Cargo.toml') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Fmt
-        working-directory: emskin
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
       - name: Clippy
-        working-directory: emskin
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --workspace -- -D warnings
 
       - name: Build
-        working-directory: emskin
-        run: cargo build
+        run: cargo build --workspace
