@@ -379,7 +379,7 @@ impl SkeletonOverlay {
     pub fn build_elements(
         &mut self,
         renderer: &mut GlesRenderer,
-        output_size_log: Size<i32, Logical>,
+        canvas: Rectangle<i32, Logical>,
         scale: f64,
     ) -> (
         Vec<SolidColorRenderElement>,
@@ -418,16 +418,24 @@ impl SkeletonOverlay {
         if visible_count > 1 {
             total_h += (visible_count - 1) * PANEL_GAP;
         }
-        let panel_right = output_size_log.w - PANEL_MARGIN;
-        let panel_bottom = output_size_log.h - PANEL_MARGIN;
-        let mut panel_y = (panel_bottom - total_h).max(PANEL_MARGIN);
+        // Pin the label panel to the canvas's bottom-right corner. When a
+        // top-anchored bar shrinks the canvas, `canvas.loc.y > 0` — the
+        // minimum-y clamp shifts down accordingly so labels never slide
+        // behind the bar.
+        let canvas_right = canvas.loc.x + canvas.size.w;
+        let canvas_bottom = canvas.loc.y + canvas.size.h;
+        let panel_right = canvas_right - PANEL_MARGIN;
+        let panel_bottom = canvas_bottom - PANEL_MARGIN;
+        let panel_min_y = canvas.loc.y + PANEL_MARGIN;
+        let panel_min_x = canvas.loc.x + PANEL_MARGIN;
+        let mut panel_y = (panel_bottom - total_h).max(panel_min_y);
         for entry in self.entries.iter_mut() {
             if !entry.has_label {
                 continue;
             }
             let lw = entry.label_size_log.0;
             let lh = entry.label_size_log.1;
-            let ex = (panel_right - lw).max(PANEL_MARGIN);
+            let ex = (panel_right - lw).max(panel_min_x);
             entry.panel_pos = (ex, panel_y);
             panel_y += lh + PANEL_GAP;
         }
@@ -639,7 +647,7 @@ impl effect_core::Effect for SkeletonOverlay {
     ) -> Vec<effect_core::CustomElement<GlesRenderer>> {
         use effect_core::CustomElement;
 
-        let (solids, labels) = self.build_elements(renderer, ctx.output_size, ctx.scale);
+        let (solids, labels) = self.build_elements(renderer, ctx.canvas, ctx.scale);
 
         // Intra-effect z-order: labels (panel text on right) → solids (borders).
         let mut out = Vec::with_capacity(solids.len() + labels.len());

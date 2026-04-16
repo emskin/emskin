@@ -38,7 +38,7 @@ The compositor / window manager. Owns:
 ### `effect-core`
 The rendering layer. Owns:
 - `trait Effect` — pure visual contract (no input, no config, no workspace)
-- `struct EffectCtx` — cursor_pos / output_size / scale / present_time only
+- `struct EffectCtx` — cursor_pos / canvas / scale / present_time only (canvas = `LayerMap::non_exclusive_zone()`, the single coordinate source for all effects)
 - `struct EffectChain` — registers and drives effects per frame
 - `struct EffectHandle<T>(Rc<RefCell<T>>)` — lets host share an instance between a typed handle and the chain
 - `fn render_workspace(...)` — composes one frame by running the chain + smithay's `render_output`

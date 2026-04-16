@@ -144,6 +144,12 @@ fn render_frame(
         // smithay `render_output` call and all damage-tracking bookkeeping.
         let scale = output.current_scale().fractional_scale();
         let output_size_log: Size<i32, Logical> = size.to_f64().to_logical(scale).to_i32_round();
+        // Effects paint into the non-exclusive zone — the space layer-shell
+        // surfaces (e.g. the external bar) haven't claimed. Falls back to the
+        // full output when no bar / no layer is mapped.
+        let canvas = state
+            .emacs_geometry()
+            .unwrap_or_else(|| Rectangle::from_size(output_size_log));
 
         // Edge-detect Emacs connection and trigger `splash.dismiss` once.
         let emacs_now = state.emacs_surface.is_some();
@@ -213,7 +219,7 @@ fn render_frame(
 
         let effect_ctx = effect_core::EffectCtx {
             cursor_pos: state.seat.get_pointer().map(|p| p.current_location()),
-            output_size: output_size_log,
+            canvas,
             scale,
             present_time: state.start_time.elapsed(),
         };

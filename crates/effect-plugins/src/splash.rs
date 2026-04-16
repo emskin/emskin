@@ -184,7 +184,7 @@ impl SplashScreen {
     pub fn build_elements(
         &mut self,
         renderer: &mut GlesRenderer,
-        output_size: Size<i32, Logical>,
+        canvas: Rectangle<i32, Logical>,
         scale: f64,
     ) -> (
         Vec<SolidColorRenderElement>,
@@ -194,7 +194,7 @@ impl SplashScreen {
             return (vec![], vec![]);
         }
 
-        let font_size = (output_size.h as f32 * FONT_RATIO)
+        let font_size = (canvas.size.h as f32 * FONT_RATIO)
             .clamp(FONT_MIN, FONT_MAX)
             .round() as i32;
         if font_size != self.cached_font_size {
@@ -236,12 +236,12 @@ impl SplashScreen {
             + self.subtitle_h
             + GAP_SUB_BAR
             + BAR_H;
-        let base_y = (output_size.h - total_h) / 2;
+        let base_y = canvas.loc.y + (canvas.size.h - total_h) / 2;
         let word_y = base_y;
         let line_y = word_y + self.letter_h + GAP_WORD_LINE;
         let sub_y = line_y + LINE_H + GAP_LINE_SUB;
         let bar_y = sub_y + self.subtitle_h + GAP_SUB_BAR;
-        let word_x = (output_size.w - self.total_word_w) / 2;
+        let word_x = canvas.loc.x + (canvas.size.w - self.total_word_w) / 2;
 
         let mut solids = Vec::with_capacity(3);
         let mut labels = Vec::with_capacity(7);
@@ -254,8 +254,8 @@ impl SplashScreen {
         solids.push(solid(
             &self.bg_id,
             self.bg_commit,
-            (0, 0),
-            output_size,
+            (canvas.loc.x, canvas.loc.y),
+            canvas.size,
             scale,
             [BG_COLOR[0], BG_COLOR[1], BG_COLOR[2], bg_alpha],
         ));
@@ -326,7 +326,7 @@ impl SplashScreen {
                 ease_out_cubic(st.min(1.0)) * g_alpha * breathe
             };
             if sa > 0.001 {
-                let sx = (output_size.w - self.subtitle_w) / 2;
+                let sx = canvas.loc.x + (canvas.size.w - self.subtitle_w) / 2;
                 let loc = Point::<f64, Logical>::from((sx as f64, sub_y as f64));
                 if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(
                     renderer,
@@ -532,7 +532,7 @@ impl effect_core::Effect for SplashScreen {
     ) -> Vec<effect_core::CustomElement<GlesRenderer>> {
         use effect_core::CustomElement;
 
-        let (solids, labels) = self.build_elements(renderer, ctx.output_size, ctx.scale);
+        let (solids, labels) = self.build_elements(renderer, ctx.canvas, ctx.scale);
 
         // Intra-effect z-order: labels (topmost, letter bitmaps) → solids (bar/line).
         let mut out = Vec::with_capacity(solids.len() + labels.len());

@@ -32,12 +32,18 @@ pub trait Effect {
 ```
 
 **There are no input / config / command methods.** Plugins interact with the world only through:
-- `EffectCtx` (cursor_pos, output_size, scale, present_time) — read-only inputs
+- `EffectCtx` (cursor_pos, canvas, scale, present_time) — read-only inputs
 - Their own `pub` methods on the concrete struct — called by the host (emskin) via a typed `Rc<RefCell<T>>`
 
 ## Key principle
 
 **From this crate's perspective, any window/workspace/connection info is fixed.** The host freezes per-frame state before calling `render_workspace`; this crate only reads.
+
+## Canvas is the single coordinate source
+
+`EffectCtx.canvas: Rectangle<i32, Logical>` is the one region effects are allowed to paint within. It is `EmskinState::usable_area()` at ctx-build time — smithay's `LayerMap::non_exclusive_zone()`. When an external bar (or any anchored layer surface) claims an exclusive zone, `canvas.loc` shifts accordingly; when no bar is running, `canvas` equals the full output rect.
+
+Effects anchor every pixel they draw to `canvas.loc` (never to `(0, 0)`), and size everything relative to `canvas.size` (never to the output). We don't provide an `output_size` field — a plugin that wants to "ignore the bar and paint across the whole screen" would create visual inconsistency between overlays; if such a need ever appears, add a second field deliberately instead of letting each effect decide.
 
 ## `render_workspace` signature
 

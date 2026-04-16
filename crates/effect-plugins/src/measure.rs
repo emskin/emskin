@@ -198,7 +198,7 @@ impl MeasureOverlay {
         &mut self,
         renderer: &mut GlesRenderer,
         cursor_logical: Point<f64, Logical>,
-        output_size_log: Size<i32, Logical>,
+        canvas: Rectangle<i32, Logical>,
         scale: f64,
     ) -> MeasureElements {
         if !self.enabled {
@@ -211,46 +211,60 @@ impl MeasureOverlay {
 
         let s: Scale<f64> = Scale::from(scale);
         let cursor_log: Point<i32, Logical> = cursor_logical.to_i32_round();
-        let cursor_phys: Point<i32, Physical> = cursor_logical.to_physical(s).to_i32_round();
-        let output_phys: Size<i32, Physical> =
-            output_size_log.to_f64().to_physical(s).to_i32_round();
+        // Cursor position relative to the canvas origin — ruler readings
+        // report this so numbers match what Emacs sees in its usable area.
+        let cursor_in_canvas = cursor_log - canvas.loc;
 
-        // Rebuild rulers only when output size changes.
-        let size_key = (output_size_log.w, output_size_log.h);
+        let canvas_phys_origin: Point<i32, Physical> =
+            canvas.loc.to_f64().to_physical(s).to_i32_round();
+        let canvas_phys_size: Size<i32, Physical> =
+            canvas.size.to_f64().to_physical(s).to_i32_round();
+
+        // Rebuild rulers when the canvas size changes.
+        let size_key = (canvas.size.w, canvas.size.h);
         if self.last_output_log != Some(size_key) {
             self.last_output_log = Some(size_key);
-            self.render_top_ruler(output_size_log.w);
-            self.render_left_ruler(output_size_log.h);
+            self.render_top_ruler(canvas.size.w);
+            self.render_left_ruler(canvas.size.h);
         }
 
         // Rebuild the cursor label (and cache its size) only when the cursor moved.
-        let pos = (cursor_log.x, cursor_log.y);
+        let pos = (cursor_in_canvas.x, cursor_in_canvas.y);
         if self.last_pos != Some(pos) {
             self.last_pos = Some(pos);
             self.lines_commit.increment();
-            self.render_label(cursor_log.x, cursor_log.y);
+            self.render_label(cursor_in_canvas.x, cursor_in_canvas.y);
         }
 
+        let cursor_phys: Point<i32, Physical> = cursor_logical.to_physical(s).to_i32_round();
         let h_line = SolidColorRenderElement::new(
             self.h_line_id.clone(),
-            Rectangle::new((0, cursor_phys.y).into(), (output_phys.w, 1).into()),
+            Rectangle::new(
+                (canvas_phys_origin.x, cursor_phys.y).into(),
+                (canvas_phys_size.w, 1).into(),
+            ),
             self.lines_commit,
             LINE_COLOR,
             Kind::Unspecified,
         );
         let v_line = SolidColorRenderElement::new(
             self.v_line_id.clone(),
-            Rectangle::new((cursor_phys.x, 0).into(), (1, output_phys.h).into()),
+            Rectangle::new(
+                (cursor_phys.x, canvas_phys_origin.y).into(),
+                (1, canvas_phys_size.h).into(),
+            ),
             self.lines_commit,
             LINE_COLOR,
             Kind::Unspecified,
         );
 
-        // Flip label direction when cursor is near the output edge.
+        // Flip label direction when cursor is near a canvas edge.
         let label_w = self.label_size.w;
         let label_h = self.label_size.h;
-        let fits_right = cursor_log.x + CURSOR_LABEL_OFFSET + label_w <= output_size_log.w;
-        let fits_below = cursor_log.y + CURSOR_LABEL_OFFSET + label_h <= output_size_log.h;
+        let canvas_right = canvas.loc.x + canvas.size.w;
+        let canvas_bottom = canvas.loc.y + canvas.size.h;
+        let fits_right = cursor_log.x + CURSOR_LABEL_OFFSET + label_w <= canvas_right;
+        let fits_below = cursor_log.y + CURSOR_LABEL_OFFSET + label_h <= canvas_bottom;
         let lx = if fits_right {
             cursor_log.x + CURSOR_LABEL_OFFSET
         } else {
@@ -274,11 +288,13 @@ impl MeasureOverlay {
         )
         .ok();
 
-        let origin_phys = Point::<f64, Logical>::from((0.0, 0.0)).to_physical(s);
+        // Rulers pin to the canvas origin, not the output origin — a bar
+        // at the top pushes the top ruler below its own exclusive zone.
+        let ruler_origin_phys = canvas.loc.to_f64().to_physical(s);
         let mut rulers = Vec::with_capacity(2);
         if let Ok(r) = MemoryRenderBufferRenderElement::from_buffer(
             renderer,
-            origin_phys,
+            ruler_origin_phys,
             &self.top_ruler_buf,
             None,
             None,
@@ -289,7 +305,7 @@ impl MeasureOverlay {
         }
         if let Ok(r) = MemoryRenderBufferRenderElement::from_buffer(
             renderer,
-            origin_phys,
+            ruler_origin_phys,
             &self.left_ruler_buf,
             None,
             None,
@@ -427,7 +443,7 @@ impl effect_core::Effect for MeasureOverlay {
         let Some(cursor) = ctx.cursor_pos else {
             return Vec::new();
         };
-        let elements = self.build_elements(renderer, cursor, ctx.output_size, ctx.scale);
+        let elements = self.build_elements(renderer, cursor, ctx.canvas, ctx.scale);
 
         // Intra-effect z-order: cursor_label → lines → rulers (topmost → bottom).
         let mut out = Vec::with_capacity(

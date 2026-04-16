@@ -39,14 +39,11 @@ Startup animation (letters + underline bar). Dismissed when Emacs connects.
 - `impl Effect::post_paint` returns `!done` to drive continuous redraws during animation
 - `should_remove = done` — chain drops the plugin after animation finishes
 
-### `workspace_bar` — chain_position 90
+The workspace bar used to live here. It was extracted into a standalone Wayland client (`crates/emskin-bar/`) that talks to the compositor via `zwlr-layer-shell-v1` + `ext-workspace-v1` — effect-plugins no longer carries workspace semantics.
 
-Top-of-screen pill bar showing workspace buttons + centered title. Currently lives here; will be extracted into an external program using `layer-shell + ext-workspace-v1` (see issue tracker).
+## Canvas-only drawing
 
-- `pub fn set_enabled(bool)` — reflects `--bar=none/builtin` CLI flag
-- `pub fn set_buttons(Vec<ButtonSpec>)` (`update` today) — called from tick.rs when workspace list changes
-- `pub fn click_at(pos) -> Option<u64>` — returns clicked workspace id
-- `pub fn visible()` — `buttons.len() > 1`
+Every plugin paints **only within** `ctx.canvas` (an `Rectangle<i32, Logical>` equal to `EmskinState::usable_area()` at ctx-build time). When an external bar claims an exclusive zone at the top, `canvas.loc.y > 0` — effects must anchor on `canvas.loc`, not `(0, 0)`, or they'll draw behind the bar. Never fall back to "output-absolute" coordinates: `effect-core` intentionally doesn't expose `output_size` anymore (see `effect-core/CLAUDE.md`).
 
 ## `is_active` convention
 
@@ -54,7 +51,6 @@ Top-of-screen pill bar showing workspace buttons + centered title. Currently liv
 - `measure::is_active` = `self.enabled`
 - `skeleton::is_active` = `self.enabled`
 - `splash::is_active` = `!self.done`
-- `workspace_bar::is_active` = `self.enabled` (not `enabled && visible()` — visible() depends on `buttons` filled by external `update()` call)
 
 ## Adding a new plugin
 
