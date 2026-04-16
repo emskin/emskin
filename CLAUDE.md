@@ -1,6 +1,6 @@
 # emskin workspace
 
-This repository is a Cargo workspace with three crates:
+This repository is a Cargo workspace with four crates:
 
 ```
 emskin/                          # workspace root
@@ -8,7 +8,8 @@ emskin/                          # workspace root
 ├── crates/
 │   ├── effect-core/             # rendering framework + Effect trait
 │   ├── effect-plugins/          # built-in visual overlays
-│   └── emskin/                  # compositor (window manager) + binary
+│   ├── emskin/                  # compositor (window manager) + binary
+│   └── emskin-bar/              # external workspace bar (Wayland client binary)
 ├── elisp/                       # Emacs-side client (shipped embedded)
 ├── demo/                        # demo scripts (shipped embedded)
 ├── .github/workflows/           # release.yml runs cargo-aur in crates/emskin
@@ -18,12 +19,15 @@ emskin/                          # workspace root
 ## Dep graph (hard boundary)
 
 ```
-emskin  ──→  effect-core
-     └──→  effect-plugins  ──→  effect-core
+emskin      ──→  effect-core
+       └──→  effect-plugins  ──→  effect-core
+emskin-bar  ──→  (no workspace deps — pure Wayland client on SCTK)
 ```
 
 `effect-plugins` **cannot** `use emskin::*` — the crate boundary is the contract.
-If you need something from emskin inside a plugin, the design is wrong.
+`emskin-bar` links against **nothing** in this workspace; it's deliberately a
+standalone program speaking only standard Wayland protocols, so any
+third-party bar (waybar / eww / …) could replace it.
 
 ## Crate responsibilities
 
@@ -49,9 +53,11 @@ The built-in overlays:
 - `measure` — crosshair + rulers (pixel inspector)
 - `skeleton` — wireframe debug overlay with clickable labels
 - `splash` — startup animation
-- `workspace_bar` — top-of-screen pill bar (future: extracted into external program — see issue tracker)
 
 Each plugin struct implements `effect_core::Effect` (purely visual) **and** exposes typed `pub` methods (`set_enabled`, `set_rects`, `click_at`, `dismiss`, `update`, …) that the host uses for control.
+
+### `emskin-bar`
+Standalone Wayland client binary. Anchors a `zwlr-layer-shell-v1` surface at the top when `ext-workspace-v1` announces ≥ 2 workspaces, unmaps it below 2. On left-click, sends `ext_workspace_handle_v1.activate` + `manager.commit` — the compositor's existing action pump (`tick.rs` → `WorkspaceAction::Activate`) handles the rest. See `crates/emskin-bar/CLAUDE.md`.
 
 ## Guiding principles
 
@@ -59,16 +65,16 @@ Each plugin struct implements `effect_core::Effect` (purely visual) **and** expo
 2. **Plugins do not know about IPC / workspaces / Emacs connection.** emskin pushes state to them by calling their typed setters directly.
 3. **Effect trait has no input methods.** Clicks are hit-tested in emskin's `input.rs` against the overlays' typed `click_at`.
 4. **`EffectHandle<T>` is the bridge**: same `Rc<RefCell<T>>` serves as typed handle in emskin + `Box<dyn Effect>` in the chain.
-5. **Cargo-aur runs in `crates/emskin/`**. Because cargo-aur 0.x does not support `version.workspace = true`, `crates/emskin/Cargo.toml` keeps literal `version` / `edition` / `license` / `repository` / `authors` values (commented in the file). Other crates inherit from `[workspace.package]`.
+5. **Compositor is self-adaptive via layer-shell.** Emacs's geometry is `EmskinState::usable_area()` = `LayerMap::non_exclusive_zone()`. There is no `bar_height()` or "bar is enabled" concept in the compositor — if any layer surface declares `exclusive_zone`, the non-exclusive rect shrinks and `relayout_emacs()` pushes the new size to Emacs. `emskin-bar` is just one such client; swapping it for waybar works out of the box.
+6. **Cargo-aur runs in `crates/emskin/`**. Because cargo-aur 0.x does not support `version.workspace = true`, `crates/emskin/Cargo.toml` keeps literal `version` / `edition` / `license` / `repository` / `authors` values (commented in the file). Other crates inherit from `[workspace.package]`. The release workflow pre-builds `emskin-bar` and copies it into `crates/emskin/` so `[package.metadata.aur].files` can ship it next to the main binary.
 
 ## `chain_position` assignments
 
-| overlay         | position | rationale |
-|-----------------|----------|-----------|
-| `splash`        | 95       | Covers everything during startup |
-| `workspace_bar` | 90       | Always-visible UI chrome |
-| `skeleton`      | 85       | Debug overlay with labels |
-| `measure`       | 80       | Cursor measurement, visible when toggled |
+| overlay    | position | rationale |
+|------------|----------|-----------|
+| `splash`   | 95       | Covers everything during startup |
+| `skeleton` | 85       | Debug overlay with labels |
+| `measure`  | 80       | Cursor measurement, visible when toggled |
 
 Effects with higher positions appear earlier in the custom-element Vec (which is the topmost slot in smithay's render stack).
 

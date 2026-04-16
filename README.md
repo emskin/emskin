@@ -95,6 +95,19 @@ Each Emacs frame maps to a workspace:
 - `C-x 5 o` — switch workspace
 - `C-x 5 0` — close current workspace
 
+A top-anchored workspace bar (`emskin-bar`) appears automatically once a
+second workspace exists and disappears when you drop back to one. Control it
+via `--bar=<mode>` on the `emskin` CLI:
+
+- `--bar=auto` *(default)* — find `emskin-bar` next to the emskin binary, falling back to `PATH`
+- `--bar=none` — don't launch a bar (e.g. you run waybar yourself)
+- `--bar=/path/to/binary` — launch a custom bar instead (anything speaking `zwlr-layer-shell-v1 + ext-workspace-v1`, such as waybar with the right modules)
+
+The bar is a standalone Wayland client — it never talks to emskin's private
+IPC, only standard Wayland protocols — and its lifecycle follows the
+compositor: it starts when emskin starts and exits when the Wayland socket
+closes.
+
 ### Launchers
 
 Bind a key to launch rofi / zofi:

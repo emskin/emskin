@@ -34,4 +34,7 @@ optdepends = ["emacs-wayland: pgtk Emacs (recommended)", "emacs: X11 Emacs (work
 files = [
     ["assets/emskin.desktop", "/usr/share/applications/emskin.desktop"],
     ["assets/emskin.png", "/usr/share/pixmaps/emskin.png"],
+    # Sibling workspace binary. The release workflow pre-builds emskin-bar
+    # and copies it into this crate's dir so cargo-aur can find it.
+    ["emskin-bar", "/usr/bin/emskin-bar"],
 ]

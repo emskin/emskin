@@ -48,12 +48,19 @@ jobs:
           key: arch-x86_64-release-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/emskin/Cargo.toml', 'crates/effect-core/Cargo.toml', 'crates/effect-plugins/Cargo.toml') }}
           restore-keys: arch-x86_64-release-
 
+      - name: Pre-build emskin-bar
+        run: cargo build --release -p emskin-bar
+
       - name: Build and package with cargo-aur
         working-directory: crates/emskin
         run: |
           cp ../../LICENSE .
+          # cargo-aur reads [package.metadata.aur].files with paths relative
+          # to this crate's dir; drop the pre-built sibling binary here so
+          # the tarball + PKGBUILD carry it into /usr/bin/.
+          cp ../../target/release/emskin-bar ./emskin-bar
           cargo aur
-          rm LICENSE
+          rm LICENSE emskin-bar
 
       - name: Get version
         id: version
