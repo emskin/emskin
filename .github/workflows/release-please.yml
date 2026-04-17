@@ -14,14 +14,12 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v4
         with:
-          # PAT (Personal Access Token) instead of the default GITHUB_TOKEN.
-          # Two reasons:
-          #   1. GITHUB_TOKEN occasionally fails silently when creating the
-          #      tag/release (we've seen "Expected 1 releases, only found 0"
-          #      with GITHUB_TOKEN). PAT exercises a different API path.
-          #   2. Tags pushed by GITHUB_TOKEN do NOT trigger downstream
-          #      workflows, so release.yml's `push: tags` would never fire.
-          #      PAT-authored tags do trigger them — closes the automation loop.
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          # Uses the default GITHUB_TOKEN. This opens/updates the Release
+          # PR automatically; after you merge it, tag + GitHub Release may
+          # need to be created manually with `gh release create vX.Y.Z
+          # --target <merge-sha>` (release-please sometimes aborts with
+          # GITHUB_TOKEN and tags it creates don't trigger downstream
+          # workflows anyway). A fine-grained PAT in secrets.RELEASE_PLEASE_TOKEN
+          # would close that loop, but the manual step is short enough.
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
