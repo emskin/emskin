@@ -113,6 +113,8 @@ matching the convention used by `emskin--window-geometry'."
 (defvar emskin--last-skeleton-rects 'unset
   "Last rect list sent via set_skeleton IPC, used for change detection.")
 
+(defvar emskin-skeleton)  ; defined in `emskin.el'
+
 (defun emskin--push-skeleton (enabled)
   "Send the current skeleton state (bool ENABLED) to the compositor.
 Skips IPC when the rect list is identical to the last one sent."
@@ -131,10 +133,10 @@ Skips IPC when the rect list is identical to the last one sent."
              (enabled . t)
              (rects . ,(vconcat rects)))))))))
 
-(defun emskin-toggle-skeleton ()
-  "Toggle the skeleton overlay (frame layout inspector)."
-  (interactive)
-  (customize-set-variable 'emskin-skeleton (not emskin-skeleton)))
+(defun emskin--skeleton-sync ()
+  (emskin--push-skeleton emskin-skeleton))
+
+(emskin-define-toggle skeleton)
 
 (defun emskin-refresh-skeleton ()
   "Re-send the current frame layout as the skeleton overlay."

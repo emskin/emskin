@@ -12,11 +12,10 @@
     (cond
      ((string= type "connected")
       (message "emskin: connected (version %s)" (gethash "version" msg "?"))
-      ;; Initialize workspace tracking: initial frame = workspace 1.
+      ;; Initial frame = workspace 1.
       (setq emskin--active-workspace-id 1)
       (puthash (selected-frame) 1 emskin--frame-workspace-table)
-      (when emskin-measure
-        (emskin--send `((type . "set_measure") (enabled . t)))))
+      (run-hooks 'emskin-connected-hook))
      ((string= type "error")
       (message "emskin error: %s" (gethash "msg" msg "")))
      ((string= type "window_created")

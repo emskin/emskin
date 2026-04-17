@@ -87,6 +87,26 @@ When an embedded app has focus, keystrokes go directly to it. Emacs prefix keys 
 - `C-x o` — switch Emacs windows (embedded apps follow buffer switches)
 - `C-x 1` / `C-x 2` / `C-x 3` — normal window operations; embedded apps resize automatically
 
+### Effects
+
+emskin ships four live-toggleable visual effects, plus a non-toggleable startup splash.
+
+| Effect | Variable | Toggle | What it does |
+|--------|----------|--------|--------------|
+| measure | `emskin-measure` | `M-x emskin-toggle-measure` | Figma-style pixel inspector: crosshair, coordinates, rulers |
+| skeleton | `emskin-skeleton` | `M-x emskin-toggle-skeleton` | Frame-layout wireframes (debug overlay, clickable labels) |
+| cursor trail | `emskin-cursor-trail` | `M-x emskin-toggle-cursor-trail` | Elastic spring trail behind the mouse pointer |
+| jelly cursor | `emskin-jelly-cursor` | `M-x emskin-toggle-jelly-cursor` | Jelly-style animation on Emacs's text caret (pgtk-only color sync) |
+
+All default to off. Configure in `~/.emacs.d/init.el`:
+
+```elisp
+(setq emskin-cursor-trail t
+      emskin-jelly-cursor t)
+```
+
+Values sync automatically on IPC connect, so `setq` works unchanged. After changing a variable mid-session, run `M-x emskin-apply-config` to push it immediately.
+
 ### Workspaces
 
 Each Emacs frame maps to a workspace:

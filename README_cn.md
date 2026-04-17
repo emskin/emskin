@@ -87,6 +87,26 @@ M-x emskin-open-native-app RET foot
 - `C-x o` — 切换 Emacs 窗口（嵌入程序随 buffer 切换自动获焦）
 - `C-x 1` / `C-x 2` / `C-x 3` — 正常的窗口操作，嵌入程序自动调整大小
 
+### 特效
+
+emskin 内置四个可开关的视觉特效，另外还有一个只在启动时播放的 splash 动画。
+
+| 特效 | 变量 | 切换命令 | 作用 |
+|------|------|----------|------|
+| 测量 | `emskin-measure` | `M-x emskin-toggle-measure` | Figma 风格像素检查器：十字准线 + 坐标 + 标尺 |
+| 骨架 | `emskin-skeleton` | `M-x emskin-toggle-skeleton` | 布局调试线框（点击标签闪烁对应 rect） |
+| 光标拖尾 | `emskin-cursor-trail` | `M-x emskin-toggle-cursor-trail` | 鼠标指针后的弹性拖尾 |
+| 果冻光标 | `emskin-jelly-cursor` | `M-x emskin-toggle-jelly-cursor` | Emacs 文本光标的果冻变形动画（pgtk） |
+
+全部默认关闭。在 `~/.emacs.d/init.el` 里配置：
+
+```elisp
+(setq emskin-cursor-trail t
+      emskin-jelly-cursor t)
+```
+
+IPC 建立时自动同步变量值给合成器，`setq` 原样就生效；如果 session 中改了变量，`M-x emskin-apply-config` 立即推送。
+
 ### 工作区
 
 每个 Emacs frame 对应一个工作区：

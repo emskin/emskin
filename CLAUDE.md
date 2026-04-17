@@ -54,6 +54,7 @@ The built-in overlays:
 - `skeleton` — wireframe debug overlay with clickable labels
 - `splash` — startup animation
 - `cursor_trail` — elastic trailing animation behind the pointer (spring-damper physics)
+- `jelly_cursor` — holo-layer-style jelly animation for Emacs's text caret (IPC-driven, `SetCursorRect` from elisp)
 
 Each plugin struct implements `effect_core::Effect` (purely visual) **and** exposes typed `pub` methods (`set_enabled`, `set_rects`, `click_at`, `dismiss`, `update`, …) that the host uses for control.
 
@@ -77,6 +78,7 @@ Standalone Wayland client binary. Anchors a `zwlr-layer-shell-v1` surface at the
 | `splash`       | 95       | Covers everything during startup |
 | `skeleton`     | 85       | Debug overlay with labels |
 | `measure`      | 80       | Cursor measurement, visible when toggled |
+| `jelly_cursor` | 77       | Text-caret animation, sits above pointer trail |
 | `cursor_trail` | 75       | Elastic trailing animation behind pointer |
 
 Effects with higher positions appear earlier in the custom-element Vec (which is the topmost slot in smithay's render stack).

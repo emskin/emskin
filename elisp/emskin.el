@@ -1,58 +1,64 @@
 ;;; emskin.el --- Emacs IPC client for the emskin Wayland compositor  -*- lexical-binding: t; -*-
 
+;;; Code:
+
 (require 'cl-lib)
 
 ;; ---------------------------------------------------------------------------
-;; Customization
+;; Connection settings
 ;; ---------------------------------------------------------------------------
 
-(defgroup emskin nil
-  "Interface to the emskin nested Wayland compositor."
-  :prefix "emskin-"
-  :group 'applications)
+(defvar emskin-ipc-path nil
+  "Explicit IPC socket path.  When nil, auto-discovered via parent PID.")
 
-(defcustom emskin-ipc-path nil
-  "Explicit IPC socket path.  When nil, auto-discovered via parent PID."
-  :type '(choice (const nil) string)
-  :group 'emskin)
-
-(defcustom emskin-measure nil
-  "Non-nil to enable the measure overlay (Figma-style pixel inspector).
-Shows a crosshair, coordinates label, and ruler strips on the
-top/left edges of the output."
-  :type 'boolean
-  :group 'emskin
-  :initialize #'custom-initialize-default
-  :set (lambda (sym val)
-         (set-default sym val)
-         (when (bound-and-true-p emskin--process)
-           (emskin--send `((type . "set_measure")
-                               (enabled . ,(if val t :json-false)))))))
-
-(defcustom emskin-skeleton nil
-  "Non-nil to enable the skeleton overlay (frame layout inspector).
-Draws wireframe rectangles around frame chrome, every window, its
-header-line/mode-line, and the echo area with coordinates and sizes."
-  :type 'boolean
-  :group 'emskin
-  :initialize #'custom-initialize-default
-  :set (lambda (sym val)
-         (set-default sym val)
-         (when (bound-and-true-p emskin--process)
-           (emskin--push-skeleton val))))
-
-(defcustom emskin-demo-dir
+(defvar emskin-demo-dir
   (expand-file-name
    "../demo"
    (file-name-directory
     (or load-file-name buffer-file-name
         "~/.emacs.d/site-lisp/emacs-application-framework/mvp/elisp/")))
-  "Directory containing EAF demo/app Python scripts."
-  :type 'directory
-  :group 'emskin)
+  "Directory containing EAF demo/app Python scripts.")
 
 ;; ---------------------------------------------------------------------------
-;; Shared internal state (used across sub-modules)
+;; Effect toggles
+;;
+;; Each effect has its implementation in a sibling file.  Flip live with
+;; the corresponding `emskin-toggle-*' command; set in your init file
+;; (e.g. `~/.emacs.d/init.el') with `setq' and (optionally) re-apply
+;; with `M-x emskin-apply-config' — or just wait for the next IPC
+;; connect.
+;; ---------------------------------------------------------------------------
+
+(defvar emskin-measure nil
+  "Non-nil to show the measure overlay — a Figma-style pixel inspector.
+Crosshair at the mouse pointer, coordinates label next to it, and
+ruler strips along the top/left edges.  Toggle with
+`emskin-toggle-measure'.")
+
+(defvar emskin-skeleton nil
+  "Non-nil to show the skeleton overlay — a frame-layout debug inspector.
+Wireframes around frame chrome, every window, header / mode-line,
+echo-area, labels with kind + geometry; clicking a label flashes the
+rect.  Toggle with `emskin-toggle-skeleton'.")
+
+(defvar emskin-cursor-trail nil
+  "Non-nil to show the cursor-trail effect — an elastic mouse-pointer trail.
+Spring-damped circles follow the pointer and bounce back when it
+stops.  Toggle with `emskin-toggle-cursor-trail'.")
+
+(defvar emskin-jelly-cursor nil
+  "Non-nil to show the jelly text-cursor animation.
+On every command that moves point, a filled quadrilateral stretches
+from the previous caret rect to the new one (200 ms), then collapses
+into the new position.  Ported from holo-layer's `jelly' style.
+Toggle with `emskin-toggle-jelly-cursor'.")
+
+(defvar emskin-jelly-fallback-color "#89dceb"
+  "Fallback jelly color when the `cursor' face has no background set.
+Most themes set one, so this rarely shows.")
+
+;; ---------------------------------------------------------------------------
+;; Shared internal state
 ;; ---------------------------------------------------------------------------
 
 (defvar emskin--process nil
@@ -108,28 +114,28 @@ Key: window-id.  Value: (SOURCE-WIN . ((VIEW-ID . EMACS-WIN) ...)).")
 (require 'emskin-ipc)
 (require 'emskin-app)
 (require 'emskin-workspace)
+(require 'emskin-measure)
 (require 'emskin-skeleton)
+(require 'emskin-cursor-trail)
+(require 'emskin-jelly)
 
 ;; ---------------------------------------------------------------------------
-;; Public API: launch apps
+;; Config sync
 ;; ---------------------------------------------------------------------------
 
-(defun emskin-toggle-measure ()
-  "Toggle the measure overlay (crosshair + rulers)."
+(defun emskin-apply-config ()
+  "Re-push every registered effect's current value to the compositor.
+Use after modifying variables with `setq'; toggle commands already
+sync on every flip."
   (interactive)
-  (customize-set-variable 'emskin-measure (not emskin-measure)))
+  (unless emskin--process
+    (user-error "emskin: not connected"))
+  (run-hooks 'emskin-connected-hook)
+  (message "emskin: config applied"))
 
-(defvar emskin--cursor-trail t
-  "Whether the cursor trail effect is on.
-Matches the compositor's default (enabled on startup).")
-
-(defun emskin-toggle-cursor-trail ()
-  "Toggle the cursor trail effect."
-  (interactive)
-  (setq emskin--cursor-trail (not emskin--cursor-trail))
-  (emskin--send `(("type" . "set_cursor_trail")
-                  ("enabled" . ,emskin--cursor-trail)))
-  (message "emskin: cursor trail %s" (if emskin--cursor-trail "ON" "OFF")))
+;; ---------------------------------------------------------------------------
+;; App launching
+;; ---------------------------------------------------------------------------
 
 (defun emskin-open-app (app-name)
   "Launch embedded application APP-NAME (Python script in `emskin-demo-dir')."
