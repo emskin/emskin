@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.10](https://github.com/emskin/emskin/compare/v0.1.9...v0.1.10) (2026-04-17)
+
+
+### Bug Fixes
+
+* test release automation end-to-end ([cc6853a](https://github.com/emskin/emskin/commit/cc6853a6cd76469d1e4ad81afb5bc052bc6461c2))
+* verify PAT-driven release automation ([8cc4d67](https://github.com/emskin/emskin/commit/8cc4d672e871b010fcd9e9be085b0a1f029174b2))
+
 ## [0.1.9](https://github.com/emskin/emskin/compare/v0.1.8...v0.1.9) (2026-04-17)
 
 
