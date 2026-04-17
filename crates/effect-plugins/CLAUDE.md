@@ -59,6 +59,17 @@ Port of holo-layer's `jelly` text-cursor animation. When Emacs's caret moves, a 
 - Data source: `zwp_text_input_v3.set_cursor_rectangle`. pgtk Emacs reports this on every caret move via GTK's IM framework — **pgtk-only**. GTK3 Emacs (XWayland) has no Wayland-side caret signal.
 - Host (emskin) drives this from `EmskinState::sync_jelly_caret()` called once per frame. It polls `seat.text_input().focus()` + `cursor_rectangle()`, filters for the active Emacs surface, and resets on focus boundary transitions (app → Emacs, Emacs → app) so the animation never spans two surfaces.
 
+### `recorder` — chain_position 90
+
+Recording indicator (red dot + MM:SS timer, top-right of canvas). Shown while a video recording is active; also ends up burned into the captured mp4 since it sits in the effect chain above everything else.
+
+- `pub fn set_active(Option<Duration>)` — idempotent; called every render tick by the host with a value derived from `Recorder::overlay_started_at(now)`, so there's no dedicated IPC for this overlay — it strictly mirrors the Recorder state machine in `emskin::recording`
+- Uses the shared `bitmap_font` module for the MM:SS digits
+
+## Shared helpers
+
+- `bitmap_font` — 5×7 glyph set (digits, `:`, `, () -`) for tiny readable labels without cosmic-text overhead. Used by `measure` (cursor coords) and `recorder` (MM:SS timer). Add new glyphs there rather than in per-plugin copies.
+
 The workspace bar used to live here. It was extracted into a standalone Wayland client (`crates/emskin-bar/`) that talks to the compositor via `zwlr-layer-shell-v1` + `ext-workspace-v1` — effect-plugins no longer carries workspace semantics.
 
 ## Canvas-only drawing
