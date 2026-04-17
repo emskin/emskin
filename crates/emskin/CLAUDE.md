@@ -41,6 +41,8 @@
 
 ## Key Gotchas
 - smithay winit backend defaults to 10-10-10-2 pixel format (2-bit alpha) — breaks GTK semi-transparent UI. Fixed by prioritizing 8-bit in smithay's `backend/winit/mod.rs`
+- GPU readback on winit backend: `ExportMem::copy_framebuffer` must run inside the `backend.bind()` block while the EGL surface is still current, but `map_texture` must run AFTER `backend.submit()` — `map_texture` internally `make_current`s without a draw surface, detaching the winit EGL surface and breaking the next `eglSwapBuffers` with `BAD_SURFACE`. See `capture.rs` + `recording.rs` for the split-across-submit pattern
+- For capture / mirror paths, trust `backend.window_size()` for physical framebuffer dimensions, NOT `output.current_mode().size` — on fractional-scale resizes (e.g. KDE 1.624×) winit resizes its EGL surface immediately but the output's mode is re-synced on the next render tick; reading mode.size at capture time gives a lagged size and produces stride-mismatched pixel data
 - winit `scale_factor()` returns 1.0 at init time; real scale arrives later via `ScaleFactorChanged` → `WinitEvent::Resized { scale_factor }`
 - Use `Scale::Fractional(scale_factor)` not `Scale::Integer(ceil)` to match host compositor's actual DPI
 - `render_scale` in `render_output()` should be 1.0 (smallvil pattern); smithay handles client buffer_scale internally
