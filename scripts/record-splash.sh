@@ -18,7 +18,7 @@ Options:
 
 Env:
   EMSKIN_ARGS          Extra args appended to the emskin invocation
-                       (default: --standalone)
+                       (default: --standalone --xkb-layout us --xkb-variant dvorak)
 EOF
 }
 
@@ -45,8 +45,8 @@ done
 # Paths (script is <repo>/scripts/record-splash.sh).
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
-CRATE_DIR="$REPO_ROOT/emskin"
-BINARY="$CRATE_DIR/target/debug/emskin"
+# Cargo workspace: target/ lives at the repo root, not inside crates/emskin.
+BINARY="$REPO_ROOT/target/debug/emskin"
 OUT="${OUT:-$REPO_ROOT/images/demo.mp4}"
 
 # Dependencies.
@@ -69,10 +69,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Build if needed.
-if (( BUILD )) && { [[ ! -x "$BINARY" ]] || [[ -n "$(find "$CRATE_DIR/src" -name '*.rs' -newer "$BINARY" 2>/dev/null | head -1)" ]]; }; then
+# Build if needed. `crates/*/src` covers every workspace member.
+if (( BUILD )) && { [[ ! -x "$BINARY" ]] || [[ -n "$(find "$REPO_ROOT/crates" -name '*.rs' -newer "$BINARY" 2>/dev/null | head -1)" ]]; }; then
     echo "Building emskin…"
-    (cd "$CRATE_DIR" && cargo build --quiet)
+    (cd "$REPO_ROOT" && cargo build --quiet)
 fi
 [[ -x "$BINARY" ]] || die "binary not found: $BINARY (try without --no-build)"
 
@@ -92,7 +92,7 @@ wf-recorder -o "$REC_OUTPUT" -f "$RAW" 2>"$LOG" &
 REC_PID=$!
 sleep 0.5  # give wf-recorder time to attach before emskin paints
 
-"$BINARY" ${EMSKIN_ARGS:---standalone} &>/dev/null &
+"$BINARY" ${EMSKIN_ARGS:---standalone --xkb-layout us --xkb-variant dvorak} &>/dev/null &
 APP_PID=$!
 
 wait "$APP_PID" 2>/dev/null || true
