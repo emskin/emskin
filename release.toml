@@ -6,15 +6,17 @@ publish = false
 push = true
 tag-prefix = ""
 tag-name = "v{{version}}"
-# `{{version}}` / `{{crate_name}}` don't expand in commit messages when
-# `consolidate-commits = true` (per cargo-release reference.md — those
-# placeholders are flagged "yes if not consolidated"). Tag names still
-# expand because `shared-version = true` gives them a workspace version.
-# Keep the commit message literal; the `vX.Y.Z` tag pushed alongside
-# carries the version.
-pre-release-commit-message = "chore: release"
+pre-release-commit-message = "chore: release {{version}}"
 consolidate-commits = true
-shared-version = true
+# Must be the string "workspace", not bool `true`. Any crate whose
+# version is `version.workspace = true` gets automatically placed in
+# the group `"workspace"` by cargo-release (see config.rs:1038). Our
+# `emskin` crate uses a literal version (cargo-aur 0.x limitation),
+# so we need to put it in the same group explicitly — otherwise
+# `find_shared_versions` sees two groups, returns None, and
+# `{{version}}` in the consolidated commit message renders as an
+# empty/unrendered template.
+shared-version = "workspace"
 
 # cargo-release already bumps [workspace.package].version AND every
 # [package].version literal on its own (confirmed by the dry-run output:
