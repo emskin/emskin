@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/emskin/emskin/compare/v0.3.1...v0.3.2) (2026-04-18)
+
+
+### Bug Fixes
+
+* **release-please:** use full default title pattern ([cf003fa](https://github.com/emskin/emskin/commit/cf003fa518d02f629116348b421be045bed27101))
+
 ## [0.3.1](https://github.com/emskin/emskin/compare/v0.3.0...v0.3.1) (2026-04-18)
 
 
