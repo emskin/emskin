@@ -6,7 +6,6 @@
     ".": {
       "release-type": "simple",
       "package-name": "emskin",
-      "pull-request-title-pattern": "chore${scope}: release ${version}",
       "extra-files": [
         {
           "type": "generic",

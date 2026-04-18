@@ -58,14 +58,9 @@ jobs:
         run: rustup show
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/*/Cargo.toml') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          workspaces: . -> target
 
       - name: Fmt
         run: cargo fmt --all --check
@@ -78,7 +73,6 @@ jobs:
 
   release-please:
     name: Release Please
-    needs: check
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
