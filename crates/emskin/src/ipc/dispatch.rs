@@ -304,9 +304,9 @@ fn ipc_set_focus(state: &mut EmskinState, window_id: Option<u64>) {
         Some(id) => state
             .apps
             .get(id)
-            .and_then(|app| app.wl_surface())
-            .or_else(|| state.emacs_surface.clone()),
-        None => state.emacs_surface.clone(),
+            .map(|app| crate::KeyboardFocusTarget::from(app.window.clone()))
+            .or_else(|| state.emacs_focus_target()),
+        None => state.emacs_focus_target(),
     };
     tracing::debug!("IPC set_focus window_id={window_id:?}");
     state.focus.prefix_saved_focus = None;

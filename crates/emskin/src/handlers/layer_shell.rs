@@ -1,7 +1,7 @@
 use smithay::{
     delegate_layer_shell,
     desktop::{layer_map_for_output, LayerSurface as DesktopLayerSurface, WindowSurfaceType},
-    reexports::wayland_server::{protocol::wl_output::WlOutput, Resource},
+    reexports::wayland_server::protocol::wl_output::WlOutput,
     utils::{Size, SERIAL_COUNTER},
     wayland::shell::wlr_layer::{Layer, LayerSurface, WlrLayerShellHandler, WlrLayerShellState},
 };
@@ -104,13 +104,18 @@ impl WlrLayerShellHandler for EmskinState {
         // Check is_alive() to handle sequential layer surfaces where the saved
         // surface may have been destroyed before this one.
         if let Some(keyboard) = self.seat.get_keyboard() {
-            if keyboard.current_focus().as_ref() == Some(surface.wl_surface()) {
+            let current_is_dying = keyboard.current_focus().is_some_and(|f| {
+                use smithay::wayland::seat::WaylandFocus;
+                f.wl_surface().as_deref() == Some(surface.wl_surface())
+            });
+            if current_is_dying {
+                use smithay::utils::IsAlive;
                 let restore = self
                     .focus
                     .layer_saved_focus
                     .take()
-                    .filter(|s| s.is_alive())
-                    .or(self.emacs_surface.clone());
+                    .filter(|t| t.alive())
+                    .or_else(|| self.emacs_focus_target());
                 let serial = SERIAL_COUNTER.next_serial();
                 keyboard.set_focus(self, restore, serial);
             }

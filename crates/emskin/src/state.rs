@@ -53,13 +53,14 @@ pub enum SelectionOrigin {
 pub struct FocusState {
     /// Saved keyboard focus before a prefix key redirect (C-x, C-c, M-x).
     /// `Some(focus)` = prefix active, restore `focus` when done; `None` = normal.
-    pub prefix_saved_focus: Option<Option<WlSurface>>,
-    /// Tracks text_input focus for manual enter/leave management.
+    pub prefix_saved_focus: Option<Option<crate::KeyboardFocusTarget>>,
+    /// Tracks text_input focus for manual enter/leave management. Kept as
+    /// `WlSurface` because text_input_v3 is a Wayland-only protocol.
     pub text_input_focus: Option<WlSurface>,
     /// Deferred `set_ime_allowed` for the winit window.
     pub pending_ime_allowed: Option<bool>,
     /// Saved keyboard focus before a layer surface took it.
-    pub layer_saved_focus: Option<WlSurface>,
+    pub layer_saved_focus: Option<crate::KeyboardFocusTarget>,
 }
 
 /// Clipboard/selection routing state grouped together.
@@ -496,6 +497,91 @@ impl EmskinState {
         Some(self.usable_area())
     }
 
+    /// The Emacs toplevel `Window`, regardless of Wayland/X11 flavour.
+    /// X11 Emacs is stored directly; Wayland Emacs is looked up by its
+    /// `wl_surface` in the active workspace `Space`.
+    pub fn emacs_window(&self) -> Option<Window> {
+        if let Some(ref win) = self.emacs_x11_window {
+            return Some(win.clone());
+        }
+        let surface = self.emacs_surface.as_ref()?;
+        self.space
+            .elements()
+            .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
+            .cloned()
+    }
+
+    /// The Emacs focus target (Wayland toplevel or X11 window).
+    pub fn emacs_focus_target(&self) -> Option<crate::KeyboardFocusTarget> {
+        self.emacs_window().map(crate::KeyboardFocusTarget::from)
+    }
+
+    /// Apply the window-manager's auto-focus policy when a new embedded
+    /// toplevel maps: grant keyboard focus + notify Emacs — unless a
+    /// prefix-key sequence is in flight (C-x / C-c / M-x) or the X11
+    /// client declines input (ICCCM `WM_HINTS.input = False`).
+    ///
+    /// One entry point for both Wayland (`xdg_shell::new_toplevel`) and
+    /// X11 (`xwayland::map_window_request`) paths — mirrors sway's
+    /// `view_map()` → `input_manager_set_focus()` pipeline.
+    pub fn auto_focus_new_window(&mut self, window: Window, window_id: u64) {
+        let focus_view = crate::ipc::OutgoingMessage::FocusView {
+            window_id,
+            view_id: 0,
+        };
+
+        // Prefix sequence active: the user is typing C-x ... , any focus
+        // steal would break the sequence. Still inform Emacs so its
+        // buffer-level "focused window" tracking stays correct.
+        if self.focus.prefix_saved_focus.is_some() {
+            self.ipc.send(focus_view);
+            return;
+        }
+
+        // X11 input-hint check — windows like splashes and tooltips
+        // explicitly decline keyboard input.
+        if let Some(x11) = window.x11_surface() {
+            if x11.input_model() == smithay::xwayland::xwm::WmInputModel::None {
+                tracing::debug!("auto_focus_new_window: X11 window_id={window_id} declines input");
+                self.ipc.send(focus_view);
+                return;
+            }
+        }
+
+        let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+        if let Some(keyboard) = self.seat.get_keyboard() {
+            keyboard.set_focus(self, Some(window.into()), serial);
+        }
+        self.ipc.send(focus_view);
+    }
+
+    /// Resolve a `wl_surface` to the keyboard focus target that owns it.
+    /// Searches layer-shell surfaces, toplevels in the active `Space`, and
+    /// tracked popups — returning the first hit in that order.
+    pub fn focus_target_for_surface(
+        &self,
+        surface: &WlSurface,
+    ) -> Option<crate::KeyboardFocusTarget> {
+        if let Some(output) = self.space.outputs().next() {
+            let map = smithay::desktop::layer_map_for_output(output);
+            if let Some(layer) = map.layer_for_surface(surface, WindowSurfaceType::TOPLEVEL) {
+                return Some(crate::KeyboardFocusTarget::from(layer.clone()));
+            }
+        }
+        if let Some(window) = self
+            .space
+            .elements()
+            .find(|w| w.wl_surface().as_deref().is_some_and(|s| s == surface))
+            .cloned()
+        {
+            return Some(crate::KeyboardFocusTarget::from(window));
+        }
+        if let Some(popup) = self.wl.popups.find_popup(surface) {
+            return Some(crate::KeyboardFocusTarget::from(popup));
+        }
+        None
+    }
+
     /// Migrate an app to the active workspace if it's in a different one.
     /// Unmaps from old space, updates workspace_id. Returns true if migrated.
     pub fn migrate_app_to_active(&mut self, window_id: u64) -> bool {
@@ -648,8 +734,9 @@ impl EmskinState {
 
         // Reset keyboard and pointer focus to the new workspace's Emacs.
         let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+        let emacs_target = self.emacs_focus_target();
         if let Some(keyboard) = self.seat.get_keyboard() {
-            keyboard.set_focus(self, self.emacs_surface.clone(), serial);
+            keyboard.set_focus(self, emacs_target, serial);
         }
         // Clear pointer focus so stale hover events don't go to old workspace surfaces.
         if let Some(pointer) = self.seat.get_pointer() {

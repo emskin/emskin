@@ -52,7 +52,7 @@ impl EmskinState {
                     if self.focus.prefix_saved_focus.is_none() {
                         self.focus.prefix_saved_focus = Some(keyboard.current_focus());
                     }
-                    if let Some(emacs) = self.emacs_surface.clone() {
+                    if let Some(emacs) = self.emacs_focus_target() {
                         if keyboard.current_focus().as_ref() != Some(&emacs) {
                             keyboard.set_focus(self, Some(emacs), SERIAL_COUNTER.next_serial());
                         }
@@ -273,7 +273,7 @@ impl EmskinState {
                         under.as_ref().map(|(s, _)| s.id()),
                         pointer.current_focus().map(|s| s.id()),
                     );
-                    let focus = under.map(|(s, _)| s).or_else(|| self.emacs_surface.clone());
+                    let under_surface = under.map(|(s, _)| s);
 
                     // Left-click on an embedded app → tell Emacs to select that window.
                     if event.button() == Some(MouseButton::Left) {
@@ -284,8 +284,9 @@ impl EmskinState {
                                 window_id,
                                 view_id,
                             });
-                        } else if let Some(window_id) =
-                            focus.as_ref().and_then(|s| self.apps.id_for_surface(s))
+                        } else if let Some(window_id) = under_surface
+                            .as_ref()
+                            .and_then(|s| self.apps.id_for_surface(s))
                         {
                             self.ipc.send(crate::ipc::OutgoingMessage::FocusView {
                                 window_id,
@@ -294,15 +295,21 @@ impl EmskinState {
                         }
                     }
 
+                    let focus = under_surface
+                        .as_ref()
+                        .and_then(|s| self.focus_target_for_surface(s))
+                        .or_else(|| self.emacs_focus_target());
+
                     // Only change keyboard focus when clicking a different client.
                     // Clicking a popup surface from the same client (e.g. Firefox
                     // menu) must NOT send wl_keyboard.leave to the toplevel —
                     // otherwise the client dismisses the popup before processing
                     // the button event.
                     let same_client = focus.as_ref().is_some_and(|new| {
-                        keyboard
-                            .current_focus()
-                            .is_some_and(|old| old.same_client_as(&new.id()))
+                        keyboard.current_focus().is_some_and(|old| {
+                            new.wl_surface()
+                                .is_some_and(|s| old.same_client_as(&s.id()))
+                        })
                     });
                     if !same_client {
                         keyboard.set_focus(self, focus, serial);

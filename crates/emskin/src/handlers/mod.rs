@@ -4,7 +4,7 @@ mod layer_shell;
 mod xdg_shell;
 mod xwayland;
 
-use crate::EmskinState;
+use crate::{EmskinState, KeyboardFocusTarget};
 
 //
 // Wl Seat
@@ -29,7 +29,7 @@ use smithay::wayland::selection::{SelectionHandler, SelectionSource, SelectionTa
 use smithay::{delegate_data_device, delegate_output, delegate_primary_selection, delegate_seat};
 
 impl SeatHandler for EmskinState {
-    type KeyboardFocus = WlSurface;
+    type KeyboardFocus = KeyboardFocusTarget;
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
 
@@ -47,9 +47,15 @@ impl SeatHandler for EmskinState {
         self.needs_redraw = true;
     }
 
-    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&KeyboardFocusTarget>) {
+        use smithay::wayland::seat::WaylandFocus;
+
         let dh = &self.display_handle;
-        let client = focused.and_then(|s| dh.get_client(s.id()).ok());
+        // text_input and data_device are Wayland-only concepts — project the
+        // focus target onto its wl_surface (X11 clients surface as the X11
+        // `wl_surface` shim once associated).
+        let focused_wl = focused.and_then(|f| f.wl_surface().map(|c| c.into_owned()));
+        let client = focused_wl.as_ref().and_then(|s| dh.get_client(s.id()).ok());
         set_data_device_focus(dh, seat, client.clone());
         set_primary_focus(dh, seat, client);
 
@@ -58,7 +64,7 @@ impl SeatHandler for EmskinState {
         use smithay::wayland::text_input::TextInputSeat;
         let ti = seat.text_input();
         let old = self.focus.text_input_focus.take();
-        let new = focused.cloned();
+        let new = focused_wl;
         if old.as_ref() != new.as_ref() {
             if old.is_some() {
                 ti.set_focus(old);

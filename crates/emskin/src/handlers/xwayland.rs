@@ -64,14 +64,17 @@ impl XwmHandler for EmskinState {
             self.emacs_surface = window.wl_surface();
             let win = Window::new_x11_window(window);
             self.space.map_element(win.clone(), (0, 0), false);
-            self.emacs_x11_window = Some(win);
+            self.emacs_x11_window = Some(win.clone());
             self.initial_size_settled = true;
 
-            if self.emacs_surface.is_some() {
-                let serial = smithay::utils::SERIAL_COUNTER.next_serial();
-                if let Some(keyboard) = self.seat.get_keyboard() {
-                    keyboard.set_focus(self, self.emacs_surface.clone(), serial);
-                }
+            // Focus the Emacs `Window` directly. smithay's `X11Surface`
+            // `KeyboardTarget` impl queues the enter in `pending_enter`
+            // when `wl_surface` hasn't been associated yet, so we don't
+            // have to wait for the `post_render` poll — as soon as the
+            // association resolves, the queued enter fires automatically.
+            let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+            if let Some(keyboard) = self.seat.get_keyboard() {
+                keyboard.set_focus(self, Some(win.into()), serial);
             }
             return;
         }
@@ -88,7 +91,7 @@ impl XwmHandler for EmskinState {
 
         self.apps.insert(crate::apps::AppWindow {
             window_id,
-            window: win,
+            window: win.clone(),
             workspace_id: self.active_workspace_id,
             geometry: Some(geo),
             pending_geometry: None,
@@ -99,6 +102,8 @@ impl XwmHandler for EmskinState {
 
         self.ipc
             .send(crate::ipc::OutgoingMessage::WindowCreated { window_id, title });
+
+        self.auto_focus_new_window(win, window_id);
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {

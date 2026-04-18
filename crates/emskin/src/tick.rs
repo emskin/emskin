@@ -275,8 +275,9 @@ fn cleanup_dead_apps(state: &mut EmskinState) {
     // Fall back to Emacs when focus is lost.
     if let Some(keyboard) = state.seat.get_keyboard() {
         if keyboard.current_focus().is_none() {
+            let target = state.emacs_focus_target();
             let serial = smithay::utils::SERIAL_COUNTER.next_serial();
-            keyboard.set_focus(state, state.emacs_surface.clone(), serial);
+            keyboard.set_focus(state, target, serial);
             tracing::debug!("focus returned to Emacs after window destroy");
         }
     }

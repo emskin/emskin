@@ -4,6 +4,7 @@ pub mod clipboard;
 pub mod clipboard_dispatch;
 pub mod clipboard_x11;
 pub mod cursor_x11;
+pub mod focus;
 pub mod handlers;
 pub mod input;
 pub mod ipc;
@@ -15,4 +16,5 @@ pub mod tick;
 pub mod utils;
 pub mod winit;
 
+pub use focus::KeyboardFocusTarget;
 pub use state::EmskinState;

@@ -50,12 +50,12 @@ impl XdgShellHandler for EmskinState {
             self.initial_size_settled = true;
 
             let window = Window::new_wayland_window(surface);
-            self.space.map_element(window, (0, 0), false);
+            self.space.map_element(window.clone(), (0, 0), false);
 
             // Give Emacs initial keyboard focus.
             let serial = SERIAL_COUNTER.next_serial();
             if let Some(keyboard) = self.seat.get_keyboard() {
-                keyboard.set_focus(self, self.emacs_surface.clone(), serial);
+                keyboard.set_focus(self, Some(window.into()), serial);
             }
         } else if self.is_emacs_client(surface.wl_surface()) {
             // Same Wayland client as Emacs — could be a new frame (C-x 5 2) or
@@ -98,15 +98,12 @@ impl XdgShellHandler for EmskinState {
                 s.size = Some((1, 1).into());
             });
 
-            // Capture wl_surface before Window::new_wayland_window consumes it.
-            let wl_surface = Some(surface.wl_surface().clone());
-
             let window = Window::new_wayland_window(surface);
             // Map at 1×1 so on_commit() and initial configure work.
             self.space.map_element(window.clone(), (0, 0), false);
             self.apps.insert(crate::apps::AppWindow {
                 window_id,
-                window,
+                window: window.clone(),
                 workspace_id: self.active_workspace_id,
                 geometry: None,
                 pending_geometry: None,
@@ -118,20 +115,7 @@ impl XdgShellHandler for EmskinState {
             self.ipc
                 .send(crate::ipc::OutgoingMessage::WindowCreated { window_id, title });
 
-            // Auto-focus: give keyboard focus to the new window UNLESS a
-            // prefix key sequence is in progress (focus was redirected to
-            // Emacs for C-x / C-c / M-x — stealing focus now would break
-            // the sequence and leave prefix_saved_focus stuck).
-            if self.focus.prefix_saved_focus.is_none() {
-                if let Some(keyboard) = self.seat.get_keyboard() {
-                    let serial = SERIAL_COUNTER.next_serial();
-                    keyboard.set_focus(self, wl_surface, serial);
-                }
-            }
-            self.ipc.send(crate::ipc::OutgoingMessage::FocusView {
-                window_id,
-                view_id: 0,
-            });
+            self.auto_focus_new_window(window, window_id);
         }
     }
 
@@ -180,7 +164,13 @@ impl XdgShellHandler for EmskinState {
         let kind = PopupKind::Xdg(surface);
 
         if let Ok(root) = find_popup_root_surface(&kind) {
-            let ret = self.wl.popups.grab_popup(root, kind, &seat, serial);
+            // PopupGrab needs the root as our KeyboardFocusTarget, not a bare
+            // wl_surface. Map it back through the space.
+            let Some(root_target) = self.focus_target_for_surface(&root) else {
+                tracing::warn!("popup grab: root surface has no known focus target");
+                return;
+            };
+            let ret = self.wl.popups.grab_popup(root_target, kind, &seat, serial);
 
             match ret {
                 Ok(mut grab) => {

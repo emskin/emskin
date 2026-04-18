@@ -327,16 +327,18 @@ fn post_render(state: &mut EmskinState, output: &Output) {
     state.space.refresh();
     state.wl.popups.cleanup();
 
-    // Poll for X11 Emacs wl_surface (XWayland associates it asynchronously).
+    // Poll for X11 Emacs `wl_surface` — XWayland associates it
+    // asynchronously, and other subsystems (text_input bridge, mirror input)
+    // still key off `emacs_surface: Option<WlSurface>`. Keyboard focus is
+    // already set during `map_window_request`: smithay's `X11Surface`
+    // `KeyboardTarget::enter` queues a `pending_enter` that fires
+    // automatically once the association resolves, so this polling loop
+    // only maintains the `wl_surface` cache.
     if state.emacs_surface.is_none() {
         if let Some(ref win) = state.emacs_x11_window {
             if let Some(surface) = win.wl_surface().map(|s| s.into_owned()) {
                 tracing::info!("X11 Emacs wl_surface resolved");
                 state.emacs_surface = Some(surface);
-                let serial = smithay::utils::SERIAL_COUNTER.next_serial();
-                if let Some(keyboard) = state.seat.get_keyboard() {
-                    keyboard.set_focus(state, state.emacs_surface.clone(), serial);
-                }
             }
         }
     }

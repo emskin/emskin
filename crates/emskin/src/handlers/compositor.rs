@@ -90,22 +90,22 @@ impl CompositorHandler for EmskinState {
                 layer.layer_surface().send_pending_configure();
 
                 let needs_focus = layer.can_receive_keyboard_focus();
-                let wl = layer.wl_surface().clone();
-                Some((needs_focus, wl, zone_before != zone_after))
+                Some((needs_focus, layer.clone(), zone_before != zone_after))
             } else {
                 None
             }
         } else {
             None
         };
-        if let Some((needs_focus, wl, zone_changed)) = layer_focus {
+        if let Some((needs_focus, layer, zone_changed)) = layer_focus {
             if needs_focus {
                 if let Some(keyboard) = self.seat.get_keyboard() {
-                    if keyboard.current_focus().as_ref() != Some(&wl) {
+                    let target = crate::KeyboardFocusTarget::from(layer);
+                    if keyboard.current_focus().as_ref() != Some(&target) {
                         // Save current focus so layer_destroyed can restore it.
                         self.focus.layer_saved_focus = keyboard.current_focus();
                         let serial = smithay::utils::SERIAL_COUNTER.next_serial();
-                        keyboard.set_focus(self, Some(wl), serial);
+                        keyboard.set_focus(self, Some(target), serial);
                         tracing::debug!("layer surface received keyboard focus");
                     }
                 }
