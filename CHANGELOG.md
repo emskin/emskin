@@ -3,6 +3,18 @@
 All notable changes to emskin are documented here.
 Generated from conventional commits via git-cliff.
 
+## [0.3.4] - 2026-04-18
+
+### Bug Fixes
+- Generate unique buffer names for embedded apps
+
+### Documentation
+- Record KeyboardFocusTarget refactor + X11 gotchas
+- README — add Vision section (Emacs deeply scripts native apps)
+- README — holo-layer credit, clarify --standalone is non-invasive
+
+### Refactor
+- Unify Wayland/X11 focus via KeyboardFocusTarget
 ## [0.3.3] - 2026-04-18
 
 ### Bug Fixes
