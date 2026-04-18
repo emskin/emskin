@@ -90,3 +90,33 @@ Effects with higher positions appear earlier in the custom-element Vec (which is
 - "How do I toggle Y?" → the plugin's typed setter, called from `crates/emskin/src/ipc/dispatch.rs`
 - "Why does click Z absorb?" → `crates/emskin/src/input.rs` (window-manager-owned hit-testing)
 - Per-crate architectural notes are in that crate's own `CLAUDE.md`.
+
+## Release flow
+
+Releases are cut with [`cargo-release`](https://github.com/crate-ci/cargo-release)
+regenerating `CHANGELOG.md` via [`git-cliff`](https://git-cliff.org/).
+
+```bash
+# one-time setup
+cargo install cargo-release git-cliff
+
+# cut a release (add --execute once the dry-run output looks right)
+cargo release patch             # 0.3.1 -> 0.3.2, dry-run
+cargo release patch --execute   # actually bump + commit + tag + push
+cargo release minor --execute   # 0.3.1 -> 0.4.0
+cargo release 0.5.0 --execute   # explicit version
+```
+
+What cargo-release does (configured in `release.toml`):
+
+1. **`pre-release-hook`** runs `git-cliff -o CHANGELOG.md --tag vX.Y.Z` — regenerates the changelog from conventional commits (config in `cliff.toml`).
+2. **`pre-release-replacements`** bump the two workspace-level literal versions:
+   - `[workspace.package].version` in root `Cargo.toml` (inherited by `effect-core` / `effect-plugins` / `emskin-bar`)
+   - `[package].version` in `crates/emskin/Cargo.toml` (literal because cargo-aur 0.x doesn't grok `version.workspace = true`)
+
+   Both lines are anchored by the trailing `# x-release-please-version` marker.
+3. Single commit `chore: release X.Y.Z` + tag `vX.Y.Z`, both pushed.
+4. Tag push triggers `.github/workflows/release.yml` → cargo-aur → PKGBUILD + tarball → GitHub Release + AUR publish. (No manual `gh release create` needed.)
+
+Commit-message convention for clean changelogs:
+`feat: …`, `fix: …`, `perf: …`, `refactor: …`, `docs: …`, `test: …`, `ci: …`, `build: …`. `chore`, `style`, merge, and revert commits are filtered out by `cliff.toml`.
