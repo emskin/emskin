@@ -84,8 +84,12 @@ rather than assuming the elisp toggle is the single source of truth."
 
 (defun emskin--on-window-created (window-id title)
   "Create/display a buffer for the new embedded app and send initial geometry."
+  ;; `generate-new-buffer' guarantees a fresh buffer even when titles
+  ;; collide (two xterms, two firefox windows, …). `get-buffer-create'
+  ;; would return the existing buffer and silently overwrite its
+  ;; `emskin--window-id', losing the mapping for the earlier window.
   (let* ((buf-name (format "*emskin: %s*" (if (string-empty-p title) "app" title)))
-         (buf (get-buffer-create buf-name)))
+         (buf (generate-new-buffer buf-name)))
     (with-current-buffer buf
       (setq-local emskin--window-id window-id)
       (setq-local mode-name "emskin")
