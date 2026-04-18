@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/emskin/emskin/compare/v0.3.0...v0.3.1) (2026-04-18)
+
+
+### Bug Fixes
+
+* **release-please:** move pull-request-title-pattern into package ([9b87ccc](https://github.com/emskin/emskin/commit/9b87ccca9cfc7d9748072a9c0695908e1efd70eb))
+
 ## [0.3.0](https://github.com/emskin/emskin/compare/v0.2.0...v0.3.0) (2026-04-18)
 
 
