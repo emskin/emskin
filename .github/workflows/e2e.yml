@@ -86,6 +86,7 @@ jobs:
           name: e2e-host-logs
           path: |
             /tmp/emskin-host-*/emez.log
+            /tmp/emskin-host-*/xwayland.log
             /tmp/emskin-host-x11-*/Xvfb.log
             /tmp/emskin-e2e-*.log
           if-no-files-found: ignore

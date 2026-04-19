@@ -51,6 +51,18 @@ impl Emez {
         display: Option<u32>,
         ready_file: Option<PathBuf>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        // Capture Xwayland's own stderr to `xwayland.log` next to the
+        // ready-file. Otherwise startup crashes (e.g. `SIGABRT` on some
+        // CI distros with no obvious cause in the parent logs) leave no
+        // trace. Files-based capture survives signal-truncated shutdown.
+        let xwayland_stderr = ready_file
+            .as_ref()
+            .and_then(|p| p.parent())
+            .map(|dir| dir.join("xwayland.log"))
+            .and_then(|path| std::fs::File::create(&path).ok())
+            .map(Stdio::from)
+            .unwrap_or_else(Stdio::null);
+
         self.xwayland_ready_file = ready_file;
 
         let (xwayland, client) = XWayland::spawn(
@@ -59,7 +71,7 @@ impl Emez {
             std::iter::empty::<(String, String)>(),
             true,
             Stdio::null(),
-            Stdio::null(),
+            xwayland_stderr,
             |_| (),
         )?;
         self.xwayland_client = Some(client.clone());
