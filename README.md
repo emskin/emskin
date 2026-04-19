@@ -214,8 +214,14 @@ emskin [OPTIONS]
   --no-spawn              Don't start Emacs; wait for external connection
   --command <CMD>         Program to launch (default: "emacs")
   --arg <ARG>             Arguments for --command (repeatable)
+  --ipc-path <PATH>       IPC socket path (default: $XDG_RUNTIME_DIR/emskin-<pid>.ipc)
+  --wayland-socket <NAME> Pin Wayland display socket name (default: wayland-N, auto)
   --bar <MODE>            Workspace bar: "auto" (default), "none", or a path
   --xkb-layout <LAYOUT>   Keyboard layout (e.g. "us", "cn")
+  --xkb-model <MODEL>     Keyboard model (e.g. "pc105")
+  --xkb-variant <VAR>     Layout variant (e.g. "nodeadkeys")
+  --xkb-options <OPTS>    XKB options (e.g. "ctrl:nocaps")
+  --log-file <PATH>       Write tracing logs to this file instead of stderr
 ```
 
 ## FAQ

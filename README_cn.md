@@ -206,8 +206,14 @@ emskin [OPTIONS]
   --no-spawn              不启动 Emacs，等待外部连接
   --command <CMD>         启动命令 (默认: "emacs")
   --arg <ARG>             命令参数 (可多次指定)
+  --ipc-path <PATH>       IPC socket 路径 (默认: $XDG_RUNTIME_DIR/emskin-<pid>.ipc)
+  --wayland-socket <NAME> 固定 Wayland display socket 名字 (默认: wayland-N, 自动)
   --bar <MODE>            工作区栏: "auto" (默认)、"none" 或自定义路径
   --xkb-layout <LAYOUT>   键盘布局 (例: "us", "cn")
+  --xkb-model <MODEL>     键盘型号 (例: "pc105")
+  --xkb-variant <VAR>     布局变体 (例: "nodeadkeys")
+  --xkb-options <OPTS>    XKB 选项 (例: "ctrl:nocaps")
+  --log-file <PATH>       将 tracing 日志写入文件而非 stderr
 ```
 
 ## FAQ
