@@ -9,7 +9,10 @@ static DEMO_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../demo");
 
 /// Nested Wayland compositor for Emacs Application Framework.
 #[derive(Parser, Debug)]
-#[command(name = "emskin")]
+#[command(
+    name = "emskin",
+    version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("EMSKIN_GIT_SHA"), ")")
+)]
 struct Cli {
     /// Do not spawn a child process; wait for an external connection.
     #[arg(long)]
