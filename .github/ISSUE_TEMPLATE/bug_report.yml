@@ -1,0 +1,164 @@
+name: Bug report
+description: Report a crash, hang, or incorrect behavior in emskin.
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. The more environment
+        info you provide, the faster we can reproduce and fix it.
+
+        ### How to collect the info we ask for below
+
+        **System info** — run in a terminal:
+        ```bash
+        uname -a
+        lspci -k | grep -EA3 'VGA|3D|Display'
+        wayland-info | head -60
+        cat /etc/os-release
+        ```
+
+        **Debug logs** — relaunch emskin with verbose logging and tee the output
+        to a file, then reproduce the bug:
+        ```bash
+        RUST_LOG=debug,smithay=info emskin 2>&1 | tee /tmp/emskin.log
+        ```
+        Attach `/tmp/emskin.log` to the issue (drag-drop into the GitHub text box).
+
+        **Screen recording** — emskin has a built-in screencast recorder. From
+        Emacs, run `M-x emskin-toggle-record` to start/stop; the resulting
+        `.mp4` (30 fps by default, see `emskin-record-fps`) lands in
+        `~/Videos/emskin/`. Drag-drop the file into the issue.
+        For visual bugs, also enable `M-x emskin-toggle-key-cast` so keystrokes
+        are overlaid on the recording.
+
+        **Screenshot** — `M-x emskin-screenshot` saves a PNG to
+        `~/Videos/emskin/` (or `emskin-screenshot-dir` if customized).
+
+        If you cannot run emskin long enough to reproduce, any external tool
+        (`grim`, `wf-recorder`, phone camera) is fine — a short clip beats no
+        clip.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I can reproduce this on the latest release (or `main`).
+          required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug.
+      placeholder: emskin crashes when I ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps. Include the exact command you used to launch emskin.
+      placeholder: |
+        1. Launch `emskin` (optionally with flags, e.g. `emskin --bar none`)
+        2. Open ...
+        3. Press ...
+        4. See crash
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: input
+    id: emskin_version
+    attributes:
+      label: emskin version
+      description: "Output of `emskin --version` (includes the release version and git SHA)."
+      placeholder: "emskin 0.3.6 (2d3168e)"
+    validations:
+      required: true
+
+  - type: input
+    id: host_compositor
+    attributes:
+      label: Host compositor
+      description: "emskin runs nested via the winit backend. Which compositor is hosting it? e.g. Hyprland 0.41, KWin 6.2, GNOME/mutter 47, sway 1.10."
+      placeholder: "Hyprland 0.41"
+    validations:
+      required: true
+
+  - type: textarea
+    id: system
+    attributes:
+      label: System info
+      description: |
+        Please paste the output of the following commands. All fields help narrow down
+        driver/kernel/Wayland issues.
+      value: |
+        <details><summary>uname -a</summary>
+
+        ```
+        $ uname -a
+        ```
+
+        </details>
+
+        <details><summary>GPU / Mesa</summary>
+
+        ```
+        $ lspci -k | grep -EA3 'VGA|3D|Display'
+        $ glxinfo -B 2>/dev/null | head -20
+        ```
+
+        </details>
+
+        <details><summary>wayland-info</summary>
+
+        ```
+        $ wayland-info | head -60
+        ```
+
+        </details>
+
+        <details><summary>Distro</summary>
+
+        ```
+        $ cat /etc/os-release
+        ```
+
+        </details>
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Re-run emskin with debug logging and paste the relevant output.
+        Scrub anything sensitive before pasting.
+      value: |
+        ```
+        $ RUST_LOG=debug,smithay=info emskin 2>&1 | tee emskin.log
+        ```
+
+        <paste relevant log lines or attach emskin.log>
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, videos, custom config, related issues, ideas for a fix.
