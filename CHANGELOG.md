@@ -3,6 +3,18 @@
 All notable changes to emskin are documented here.
 Generated from conventional commits via git-cliff.
 
+## [0.3.10] - 2026-04-20
+
+### Documentation
+- Annotate offer new-id handshake in sequence diagrams
+- Clipboard flow and protocol references
+
+### Features
+- Emez clipboard manager + xdg_activation focus path
+- Wl_data_device fallback for KDE/GNOME hosts
+
+### Refactor
+- Extract emskin-clipboard as smithay-free crate
 ## [0.3.9] - 2026-04-19
 
 ### Bug Fixes
