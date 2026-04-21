@@ -491,6 +491,39 @@ impl Compositor {
     }
 
     pub fn spawn_on(host: NestedHost) -> Self {
+        Self::spawn_on_impl(host, &[], &[])
+    }
+
+    /// Spawn emskin on `host` with `--xwayland-backend=satellite` and
+    /// the given satellite binary. Matches niri's runtime flow — emskin
+    /// pre-binds the X11 sockets and spawns the satellite lazily on X
+    /// client connect.
+    ///
+    /// `extra_env` is forwarded into emskin's environment; emskin in turn
+    /// inherits it into the satellite child, letting tests plant hooks
+    /// (e.g. a pidfile path) into the mock satellite script.
+    pub fn spawn_with_satellite(
+        host: NestedHost,
+        satellite_bin: &Path,
+        extra_env: &[(&str, &Path)],
+    ) -> Self {
+        let bin_str = satellite_bin
+            .to_str()
+            .expect("satellite binary path must be UTF-8")
+            .to_owned();
+        Self::spawn_on_impl(
+            host,
+            &[
+                "--xwayland-backend".to_owned(),
+                "satellite".to_owned(),
+                "--xwayland-satellite-bin".to_owned(),
+                bin_str,
+            ],
+            extra_env,
+        )
+    }
+
+    fn spawn_on_impl(host: NestedHost, extra_args: &[String], extra_env: &[(&str, &Path)]) -> Self {
         let emskin_wayland_socket = format!("emskin-{}", unique_suffix());
         let ipc_socket = unique_tempfile("emskin-e2e", "ipc");
         let log_file = unique_tempfile("emskin-e2e", "log");
@@ -529,8 +562,12 @@ impl Compositor {
             // transient test clients (wl-copy, xclip, …) don't get
             // misidentified as the Emacs frame.
             .env("EMSKIN_DISABLE_EMACS_DETECTION", "1")
+            .args(extra_args)
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+        for (k, v) in extra_env {
+            cmd.env(k, v);
+        }
 
         // Wayland host: hand WAYLAND_DISPLAY to winit → wayland backend.
         // X11 host: leave WAYLAND_DISPLAY unset → winit falls back to X11.
@@ -633,6 +670,10 @@ impl Compositor {
     /// the harness pre-allocates it before spawning emskin).
     pub fn emskin_display(&self) -> String {
         format!(":{}", self.emskin_xwayland_display)
+    }
+
+    pub fn emskin_display_num(&self) -> u32 {
+        self.emskin_xwayland_display
     }
 
     pub fn log_tail(&self) -> String {
