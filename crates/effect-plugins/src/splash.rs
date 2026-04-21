@@ -102,6 +102,12 @@ pub struct SplashScreen {
 
     font_system: FontSystem,
     swash_cache: SwashCache,
+    /// `true` when fontconfig found no usable font face. cosmic-text panics
+    /// inside `Buffer::set_text` when the default-font lookup unwraps a
+    /// `None`, so we detect this once at construction and short-circuit
+    /// every text-rendering code path. The animation degrades to bg + bar
+    /// + sweep line; the compositor stays alive.
+    text_disabled: bool,
 
     letters: Vec<LetterSlot>,
     subtitle_buf: MemoryRenderBuffer,
@@ -142,12 +148,23 @@ impl SplashScreen {
             })
             .collect();
 
+        let font_system = FontSystem::new();
+        let text_disabled = font_system.db().faces().next().is_none();
+        if text_disabled {
+            tracing::warn!(
+                "splash: no system fonts found via fontconfig — text overlay disabled. \
+                 Install a TTF font package (e.g. ttf-dejavu on Arch, fonts-dejavu-core \
+                 on Debian) to restore the splash text."
+            );
+        }
+
         Self {
             start: None,
             dismiss_time: None,
             done: false,
-            font_system: FontSystem::new(),
+            font_system,
             swash_cache: SwashCache::new(),
+            text_disabled,
             letters,
             subtitle_buf: MemoryRenderBuffer::new(
                 Fourcc::Argb8888,
@@ -367,6 +384,13 @@ impl SplashScreen {
     // --- Rebuild letter / subtitle buffers ------------------------------------
 
     fn rebuild(&mut self, font_size: f32) {
+        if self.text_disabled {
+            // Pretend the text rebuild ran so we don't keep re-trying
+            // every frame. Letter / subtitle widths stay at 0, so the
+            // layout collapses to bg + bar without text.
+            self.cached_font_size = font_size.round() as i32;
+            return;
+        }
         let lh = font_size * 1.1;
         let fs = &mut self.font_system;
         let cache = &mut self.swash_cache;
