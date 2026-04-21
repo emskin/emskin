@@ -111,6 +111,7 @@ rather than assuming the elisp toggle is the single source of truth."
     (when-let ((win (get-buffer-window buf t)))
       (set-window-scroll-bars win 0 nil 0 nil)
       (emskin--report-geometry window-id win))
+	(emskin--sync-focus)
     (message "emskin: embedded app ready (id=%s)" window-id)))
 
 (defun emskin--find-buffer (window-id)
@@ -141,8 +142,9 @@ rather than assuming the elisp toggle is the single source of truth."
     ;; an emskin app and send set_focus so the compositor matches.
     (let ((next-wid (buffer-local-value 'emskin--window-id
                                         (window-buffer (selected-window)))))
-      (emskin--send `((type . "set_focus")
-                      (window_id . ,(or next-wid :json-null)))))
+      (emskin--send (if next-wid
+                        `((type . "set_focus") (window_id . ,next-wid))
+                      '((type . "set_focus")))))
     (message "emskin: window %s destroyed" window-id)))
 
 (defun emskin--on-title-changed (window-id title)
