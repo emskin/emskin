@@ -12,7 +12,7 @@ use std::borrow::Cow;
 
 use smithay::{
     backend::input::KeyState,
-    desktop::{LayerSurface, PopupKind, Window, WindowSurface},
+    desktop::{LayerSurface, PopupKind, Window},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         Seat,
@@ -39,11 +39,18 @@ pub enum KeyboardFocusTarget {
 impl KeyboardFocusTarget {
     /// Returns the underlying smithay `KeyboardTarget` so the enum impl
     /// can just delegate.
+    ///
+    /// `Window::toplevel()` already handles both variants of
+    /// `WindowSurface` internally (returns `None` for the X11 branch when
+    /// smithay's `xwayland` feature is enabled), so we don't need an
+    /// explicit match — and we avoid a non-exhaustive match error when the
+    /// feature is pulled in by a sibling crate (emez).
     fn inner(&self) -> &dyn KeyboardTarget<EmskinState> {
         match self {
-            Self::Window(w) => match w.underlying_surface() {
-                WindowSurface::Wayland(t) => t.wl_surface(),
-            },
+            Self::Window(w) => w
+                .toplevel()
+                .expect("X clients reach emskin as Wayland toplevels via xwayland-satellite")
+                .wl_surface(),
             Self::Layer(l) => l.wl_surface(),
             Self::Popup(p) => p.wl_surface(),
         }
@@ -74,9 +81,9 @@ impl WaylandFocus for KeyboardFocusTarget {
     #[inline]
     fn same_client_as(&self, object_id: &ObjectId) -> bool {
         match self {
-            Self::Window(w) => match w.underlying_surface() {
-                WindowSurface::Wayland(t) => t.wl_surface().same_client_as(object_id),
-            },
+            Self::Window(w) => w
+                .toplevel()
+                .is_some_and(|t| t.wl_surface().same_client_as(object_id)),
             Self::Layer(l) => l.wl_surface().same_client_as(object_id),
             Self::Popup(p) => p.wl_surface().same_client_as(object_id),
         }
