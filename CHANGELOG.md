@@ -3,6 +3,41 @@
 All notable changes to emskin are documented here.
 Generated from conventional commits via git-cliff.
 
+## [0.3.11] - 2026-04-21
+
+### Bug Fixes
+- Degrade gracefully when no system font is installed
+- Use Window::toplevel() to avoid non-exhaustive match under workspace clippy
+- Keep Emacs at bottom of Space to stop app white-screen on resize
+- Restore smithay xwayland feature per-crate
+- Restore focus after app close and focus new app after file open
+- Jelly cursor wrong position in child frames
+
+### CI
+- Switch to Arch container for native xwayland-satellite + fonts
+
+### Documentation
+- Require a fontconfig-visible font (ttf-dejavu) at runtime
+- Credit niri and xwayland-satellite in README acknowledgements
+- Sync README / CONTRIBUTING / clipboard-protocols with satellite backend
+- Update clipboard-flows.md for satellite architecture
+- Update CLAUDE.md + AUR optdepends for satellite backend
+- Add input method protocol reference (#47)
+- List niri in compatibility table
+
+### Features
+- CLI flag + EmskinState wiring for satellite backend
+- Niri-style xwayland-satellite integration components
+
+### Refactor
+- Address review feedback + CLAUDE.md bindeps note
+- Drop smithay xwayland feature + residual X11 plumbing
+- Delete smithay X11Wm path, make satellite the only backend
+
+### Tests
+- Widen IPC read timeout + surface child stderr/log on spawn failure
+- Drop internal-X ('ix') role from clipboard matrix
+- E2E harness + smoke test for satellite backend
 ## [0.3.10] - 2026-04-20
 
 ### Documentation
