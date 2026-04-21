@@ -14,7 +14,7 @@ Debian/Ubuntu. On Arch:
 
 ```
 sudo pacman -S wayland libxkbcommon libinput mesa seatd pixman \
-               libxcb xcb-util-cursor xcb-util-wm fontconfig freetype2
+               libxcb xcb-util-cursor xcb-util-wm fontconfig freetype2 ttf-dejavu
 ```
 
 E2E tests run against two private host backends:

@@ -56,7 +56,7 @@ replace = 'version = "{{version}}"'
 exactly = 1
 
 [package.metadata.aur]
-depends = ["wayland", "libxkbcommon", "libxkbcommon-x11", "mesa", "libinput", "seatd", "fontconfig", "freetype2", "xorg-xwayland"]
+depends = ["wayland", "libxkbcommon", "libxkbcommon-x11", "mesa", "libinput", "seatd", "fontconfig", "freetype2", "ttf-dejavu", "xorg-xwayland"]
 optdepends = [
     "emacs-wayland: pgtk Emacs (recommended)",
     "emacs: X11 Emacs (works via xwayland-satellite)",
