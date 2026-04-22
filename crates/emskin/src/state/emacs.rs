@@ -91,8 +91,22 @@ impl EmacsState {
 
     /// Stash the spawned `emacs` child so the shutdown path can reap
     /// it and the tick loop can poll liveness.
+    ///
+    /// If a previous child is already tracked, kill and wait on it
+    /// before replacing — silently dropping a running `Child` leaks
+    /// the process (on Unix it becomes init's orphan for the rest of
+    /// its natural lifetime). In production this path is not expected
+    /// to fire (the compositor spawns exactly one Emacs), but the
+    /// defensive reap keeps the API misuse-safe.
     pub fn set_child(&mut self, child: std::process::Child) {
-        self.child = Some(child);
+        if let Some(mut old) = self.child.replace(child) {
+            tracing::warn!(
+                "EmacsState::set_child replacing a live child (pid {}); killing previous",
+                old.id()
+            );
+            let _ = old.kill();
+            let _ = old.wait();
+        }
     }
 
     /// Remove and return the child handle (shutdown path).
@@ -266,6 +280,85 @@ mod tests {
         // that the second call doesn't panic and leaves a handle.
         let mut taken = e.take_child().expect("second set_child took effect");
         let _ = taken.wait();
+    }
+
+    /// Long-running probe child (`/bin/sleep 60`) for zombie-safety
+    /// tests. `/bin/true` is too short-lived — it exits before the
+    /// outer test can distinguish "the Child handle was silently
+    /// dropped" from "kill + wait was called".
+    fn long_running_child() -> std::process::Child {
+        std::process::Command::new("sleep")
+            .arg("60")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn sleep 60 for test")
+    }
+
+    /// `libc::kill(pid, 0)` sends no signal; it probes pid validity.
+    /// Returns 0 if the process exists (dead-zombie or alive), ESRCH
+    /// otherwise. After `set_child`'s internal `kill + wait`, the pid
+    /// must be fully reaped — not even a zombie — so this returns
+    /// `false`.
+    fn pid_alive(pid: u32) -> bool {
+        // SAFETY: Signal 0 is a documented no-op probe for libc::kill;
+        // it has no side effects on the target process.
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+
+    #[test]
+    fn set_child_kills_and_reaps_previous_live_child() {
+        // Regression guard: the pre-fix `set_child` silently overwrote
+        // the Child handle, which — for a live process — leaks a
+        // running child until the compositor exits (at which point
+        // init reaps it). Verify the new contract: `set_child` kills
+        // and waits on any previous child before replacing.
+        let mut e = EmacsState::new(true);
+
+        let previous = long_running_child();
+        let previous_pid = previous.id();
+        e.set_child(previous);
+        assert!(
+            pid_alive(previous_pid),
+            "precondition: sleep 60 must be alive before overwrite"
+        );
+
+        e.set_child(short_lived_child());
+
+        assert!(
+            !pid_alive(previous_pid),
+            "previous child (pid {previous_pid}) survived set_child — \
+             kill + wait was not applied"
+        );
+
+        // Reap the replacement so the test doesn't leave a stray
+        // short-lived /bin/true zombie.
+        let _ = e.take_child().unwrap().wait();
+    }
+
+    #[test]
+    fn set_child_is_a_no_op_on_already_dead_previous() {
+        // Idempotency guard: reaping a child that is already a zombie
+        // (e.g. `/bin/true` finished between set_child calls) must not
+        // panic or hang. `kill()` on a dead pid returns ESRCH which we
+        // ignore; `wait()` on a zombie reaps cleanly.
+        let mut e = EmacsState::new(true);
+
+        let mut already_dead = short_lived_child();
+        // Ensure the child is a zombie by the time we hand it over.
+        // Poll until try_wait reports exit; short-timeout loop to keep
+        // the test fast under load.
+        for _ in 0..100 {
+            match already_dead.try_wait() {
+                Ok(Some(_)) => break,
+                _ => std::thread::sleep(std::time::Duration::from_millis(10)),
+            }
+        }
+
+        e.set_child(already_dead);
+        e.set_child(short_lived_child());
+
+        let _ = e.take_child().unwrap().wait();
     }
 
     #[test]
