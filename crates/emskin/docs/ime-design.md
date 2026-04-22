@@ -65,7 +65,7 @@ smithay 的 `text_input.enter()/leave()` 被门控在 `input_method.has_instance
 
 ### 5. 代码位置
 
-所有 IME 逻辑收拢在 `crates/emskin/src/ime.rs::ImeBridge`：`on_focus_changed`（手动 enter/leave + `client_has_text_input` 嗅探）、`on_host_ime_event`（宿主 IME 事件转发 + 光标矩形同步）、`take_ime_enabled`（供 render loop 读取）、`reset_on_workspace_switch`。调用方（`handlers/seat.rs`、`winit.rs`、`state.rs` 的 workspace 切换点）都只做一行委托。
+所有 IME 逻辑收拢在 `crates/emskin/src/state/ime.rs::ImeBridge`：`on_focus_changed`（手动 enter/leave + `client_has_text_input` 嗅探）、`on_host_ime_event`（宿主 IME 事件转发 + 光标矩形同步）、`take_ime_enabled`（供 render loop 读取）、`reset_on_workspace_switch`。调用方（`handlers/seat.rs`、`winit.rs`、`state/mod.rs` 的 workspace 切换点）都只做一行委托。
 
 ## smithay 补丁
 
