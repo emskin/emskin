@@ -44,7 +44,7 @@ impl EmskinState {
 
                         if pressed && !is_modifier_keysym(key) {
                             if let Some(label) = format_chord(modifiers, key) {
-                                state.key_cast.borrow_mut().push(label);
+                                state.effects.key_cast.borrow_mut().push(label);
                             }
                         }
 
@@ -260,16 +260,16 @@ impl EmskinState {
                     // Scope the borrow so subsequent pointer-focus code can
                     // still reborrow `self`.
                     let skeleton_hit = {
-                        let mut sk = self.skeleton.borrow_mut();
+                        let mut sk = self.effects.skeleton.borrow_mut();
                         sk.enabled() && sk.click_at(pos).is_some()
                     };
                     if skeleton_hit {
-                        self.skeleton_click_absorbed = true;
+                        self.effects.skeleton_click_absorbed = true;
                         return;
                     }
                 }
-                if button_state == ButtonState::Released && self.skeleton_click_absorbed {
-                    self.skeleton_click_absorbed = false;
+                if button_state == ButtonState::Released && self.effects.skeleton_click_absorbed {
+                    self.effects.skeleton_click_absorbed = false;
                     return;
                 }
 
