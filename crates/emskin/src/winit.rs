@@ -1,4 +1,5 @@
 use std::time::Duration;
+use winit_crate::platform::wayland::WindowAttributesExtWayland;
 
 use smithay::{
     backend::{
@@ -357,7 +358,8 @@ pub fn init_winit(
     let attributes = winit_crate::window::Window::default_attributes()
         .with_inner_size(winit_crate::dpi::LogicalSize::new(1280.0, 800.0))
         .with_title("Emacs")
-        .with_visible(true);
+        .with_visible(true)
+        .with_name("emskin", "emskin");
     let (mut backend, winit) = winit::init_from_attributes(attributes)?;
     if fullscreen {
         backend
