@@ -471,6 +471,7 @@ pub fn init_winit(
 
                 WinitEvent::Focus(focused) => {
                     if focused {
+                        state.on_focus_enter();
                         // Release all stuck keys to prevent phantom modifiers
                         // after Alt+Tab round-trip (the host eats the release).
                         let Some(keyboard) = state.seat.get_keyboard() else {
@@ -496,6 +497,8 @@ pub fn init_winit(
                                 );
                             }
                         }
+                    } else {
+                        state.on_focus_leave();
                     }
                     state.needs_redraw = true;
                 }

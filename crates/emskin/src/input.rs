@@ -384,6 +384,47 @@ impl EmskinState {
             _ => {}
         }
     }
+
+    /// emskin's winit window lost focus (Alt+Tab away, minimize, etc.).
+    /// Save the current keyboard focus and clear it so embedded clients
+    /// stop thinking they still have focus. `focus_changed` cascades the
+    /// clear to IME, data_device, and primary_selection. Pointer focus
+    /// is released here too (bundled with keyboard until winit gives us
+    /// separate `CursorLeft` events — YAGNI for now).
+    pub fn on_focus_leave(&mut self) {
+        let serial = SERIAL_COUNTER.next_serial();
+        if let Some(keyboard) = self.seat.get_keyboard() {
+            self.focus.host_saved_focus = keyboard.current_focus();
+            keyboard.set_focus(self, None, serial);
+        }
+        if let Some(pointer) = self.seat.get_pointer() {
+            pointer.motion(
+                self,
+                None,
+                &MotionEvent {
+                    location: pointer.current_location(),
+                    serial,
+                    time: 0,
+                },
+            );
+            pointer.frame(self);
+        }
+    }
+
+    /// emskin's winit window regained focus. Restore the keyboard focus
+    /// saved by `on_focus_leave`; the `focus_changed` cascade re-enables
+    /// IME (if the restored client has text_input_v3 bound) and rewires
+    /// data_device / primary_selection.
+    pub fn on_focus_enter(&mut self) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        let Some(saved) = self.focus.host_saved_focus.take() else {
+            return;
+        };
+        let serial = SERIAL_COUNTER.next_serial();
+        keyboard.set_focus(self, Some(saved), serial);
+    }
 }
 
 /// Pure-modifier keysyms — pressing one alone shouldn't generate a

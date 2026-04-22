@@ -67,6 +67,10 @@ pub struct FocusState {
     pub prefix_saved_focus: Option<Option<crate::KeyboardFocusTarget>>,
     /// Saved keyboard focus before a layer surface took it.
     pub layer_saved_focus: Option<crate::KeyboardFocusTarget>,
+    /// Saved keyboard focus when the host window lost focus; restored
+    /// on regain. Prevents embedded clients from thinking they still
+    /// have focus while the user Alt+Tab'd away from emskin.
+    pub host_saved_focus: Option<crate::KeyboardFocusTarget>,
 }
 
 /// Clipboard/selection routing state grouped together.
