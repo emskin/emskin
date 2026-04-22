@@ -153,10 +153,10 @@ fn render_frame(
 
         // Edge-detect Emacs connection and trigger `splash.dismiss` once.
         let emacs_now = state.emacs_surface.is_some();
-        if emacs_now && !state.last_emacs_connected {
-            state.splash.borrow_mut().dismiss();
+        if emacs_now && !state.effects.last_emacs_connected {
+            state.effects.splash.borrow_mut().dismiss();
         }
-        state.last_emacs_connected = emacs_now;
+        state.effects.last_emacs_connected = emacs_now;
 
         // Non-effect elements: software cursor, layer shell surfaces, window
         // mirrors. emskin assembles these itself.
@@ -229,7 +229,7 @@ fn render_frame(
             renderer,
             &mut framebuffer,
             &state.workspace.active_space,
-            &mut state.effect_chain,
+            &mut state.effects.chain,
             &effect_ctx,
             extras,
             damage_tracker,
@@ -289,14 +289,22 @@ fn render_frame(
     // dot stays in lockstep with whatever the recorder actually is.
     let now = state.start_time.elapsed();
     let overlay_at = state.recorder.overlay_started_at(now);
-    state.recorder_overlay.borrow_mut().set_active(overlay_at);
+    state
+        .effects
+        .recorder_overlay
+        .borrow_mut()
+        .set_active(overlay_at);
 
     // Recording ⇆ KeyCast linkage. Edge-trigger only so user toggles
     // (`SetKeyCast` IPC) outside a recording session aren't stomped.
     let recording_active = overlay_at.is_some();
-    if recording_active != state.last_recording_active {
-        state.last_recording_active = recording_active;
-        state.key_cast.borrow_mut().set_enabled(recording_active);
+    if recording_active != state.effects.last_recording_active {
+        state.effects.last_recording_active = recording_active;
+        state
+            .effects
+            .key_cast
+            .borrow_mut()
+            .set_enabled(recording_active);
         tracing::debug!(
             "key_cast auto-{} (recording {})",
             if recording_active { "on" } else { "off" },

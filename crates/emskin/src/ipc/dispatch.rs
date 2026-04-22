@@ -40,19 +40,19 @@ pub fn handle_ipc_message(state: &mut EmskinState, msg: IncomingMessage) {
         }
         IncomingMessage::SetMeasure { enabled } => {
             tracing::debug!("IPC set_measure enabled={enabled}");
-            state.measure.borrow_mut().set_enabled(enabled);
+            state.effects.measure.borrow_mut().set_enabled(enabled);
         }
         IncomingMessage::SetCursorTrail { enabled } => {
             tracing::debug!("IPC set_cursor_trail enabled={enabled}");
-            state.cursor_trail.borrow_mut().set_enabled(enabled);
+            state.effects.cursor_trail.borrow_mut().set_enabled(enabled);
         }
         IncomingMessage::SetKeyCast { enabled } => {
             tracing::debug!("IPC set_key_cast enabled={enabled}");
-            state.key_cast.borrow_mut().set_enabled(enabled);
+            state.effects.key_cast.borrow_mut().set_enabled(enabled);
         }
         IncomingMessage::SetSkeleton { enabled, rects } => {
             tracing::debug!("IPC set_skeleton enabled={enabled} rects={}", rects.len());
-            let mut sk = state.skeleton.borrow_mut();
+            let mut sk = state.effects.skeleton.borrow_mut();
             sk.set_enabled(enabled);
             if enabled {
                 sk.set_rects(rects);
@@ -68,7 +68,7 @@ pub fn handle_ipc_message(state: &mut EmskinState, msg: IncomingMessage) {
         }
         IncomingMessage::SetJellyCursor { enabled } => {
             tracing::debug!("IPC set_jelly_cursor enabled={enabled}");
-            state.jelly_cursor.borrow_mut().set_enabled(enabled);
+            state.effects.jelly_cursor.borrow_mut().set_enabled(enabled);
         }
         IncomingMessage::SetCursorRect { rect, color } => {
             ipc_set_cursor_rect(state, rect, color);
@@ -119,7 +119,7 @@ pub fn handle_ipc_message(state: &mut EmskinState, msg: IncomingMessage) {
 fn ipc_set_cursor_rect(state: &mut EmskinState, rect: crate::ipc::IpcRect, color: Option<String>) {
     let now = state.start_time.elapsed();
     let canvas_rect = state.emacs_rect_to_canvas(rect);
-    let mut jc = state.jelly_cursor.borrow_mut();
+    let mut jc = state.effects.jelly_cursor.borrow_mut();
     if let Some(hex) = color.as_deref() {
         jc.set_color_hex(hex);
     }

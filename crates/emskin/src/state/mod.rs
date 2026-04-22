@@ -1,4 +1,5 @@
 pub mod apps;
+pub mod effects;
 pub mod focus;
 pub mod ime;
 pub mod workspace;
@@ -214,35 +215,10 @@ pub struct EmskinState {
     /// IME (text_input_v3) bridge — host IME ↔ embedded Wayland clients.
     pub ime: crate::ime::ImeBridge,
 
-    /// Registered overlays driven by effect-core's `EffectChain`.
-    pub effect_chain: effect_core::EffectChain,
-
-    /// Typed handles to each overlay — same instance is also registered in
-    /// `effect_chain` via `EffectHandle`. Lets window-manager code (input
-    /// routing, IPC dispatch, workspace-switch reset) call the overlay's
-    /// typed setters directly without going through the trait.
-    pub measure: std::rc::Rc<std::cell::RefCell<effect_plugins::measure::MeasureOverlay>>,
-    pub skeleton: std::rc::Rc<std::cell::RefCell<effect_plugins::skeleton::SkeletonOverlay>>,
-    pub splash: std::rc::Rc<std::cell::RefCell<effect_plugins::splash::SplashScreen>>,
-    pub cursor_trail: std::rc::Rc<std::cell::RefCell<effect_plugins::cursor_trail::CursorTrail>>,
-    pub jelly_cursor: std::rc::Rc<std::cell::RefCell<effect_plugins::jelly_cursor::JellyCursor>>,
-    pub recorder_overlay:
-        std::rc::Rc<std::cell::RefCell<effect_plugins::recorder::RecorderOverlay>>,
-    pub key_cast: std::rc::Rc<std::cell::RefCell<effect_plugins::key_cast::KeyCastOverlay>>,
-
-    /// Whether a skeleton label-click was swallowed — matching release must
-    /// also be swallowed. Lives in the window manager, not the overlay.
-    pub skeleton_click_absorbed: bool,
-
-    /// Edge-detect latch for "Emacs just connected" → triggers `splash.dismiss()`
-    /// exactly once. Initialised false; set to true the first frame Emacs's
-    /// surface is present.
-    pub last_emacs_connected: bool,
-
-    /// Edge-detect latch for "recording state changed" → toggles
-    /// `key_cast` overlay on/off so screencasts always show keystrokes
-    /// without the user having to enable it separately.
-    pub last_recording_active: bool,
+    /// Built-in visual overlays + their host-side edge-detect flags.
+    /// Grouped so the render loop and workspace-switch reset both see
+    /// a single cohesive module instead of eleven flat fields.
+    pub effects: effects::EffectsState,
 
     /// Current cursor image status. For Named, the host cursor is used;
     /// for Surface (GTK3/Emacs), the cursor is software-rendered each frame.
@@ -320,40 +296,6 @@ impl EmskinState {
 
         let loop_signal = event_loop.get_signal();
 
-        // Overlays: same instance shared between the typed handle kept on
-        // `EmskinState` (for input routing, IPC dispatch, workspace-switch
-        // reset) and the `EffectHandle` wrapper registered into the chain
-        // (for rendering). `register_overlay` does both in one step.
-        let mut effect_chain = effect_core::EffectChain::default();
-        let splash = register_overlay(
-            &mut effect_chain,
-            effect_plugins::splash::SplashScreen::new(),
-        );
-        let skeleton = register_overlay(
-            &mut effect_chain,
-            effect_plugins::skeleton::SkeletonOverlay::new(),
-        );
-        let measure = register_overlay(
-            &mut effect_chain,
-            effect_plugins::measure::MeasureOverlay::new(),
-        );
-        let cursor_trail = register_overlay(
-            &mut effect_chain,
-            effect_plugins::cursor_trail::CursorTrail::new(),
-        );
-        let jelly_cursor = register_overlay(
-            &mut effect_chain,
-            effect_plugins::jelly_cursor::JellyCursor::new(),
-        );
-        let recorder_overlay = register_overlay(
-            &mut effect_chain,
-            effect_plugins::recorder::RecorderOverlay::new(),
-        );
-        let key_cast = register_overlay(
-            &mut effect_chain,
-            effect_plugins::key_cast::KeyCastOverlay::new(),
-        );
-
         Ok(Self {
             start_time,
             display_handle: dh,
@@ -417,17 +359,7 @@ impl EmskinState {
             selection: SelectionState::default(),
             focus: FocusState::default(),
             ime,
-            effect_chain,
-            measure,
-            skeleton,
-            splash,
-            cursor_trail,
-            jelly_cursor,
-            recorder_overlay,
-            key_cast,
-            skeleton_click_absorbed: false,
-            last_emacs_connected: false,
-            last_recording_active: false,
+            effects: effects::EffectsState::default(),
             cursor_status: CursorImageStatus::default_named(),
             cursor_changed: false,
             last_pointer_raw_loc: None,
@@ -691,20 +623,8 @@ impl EmskinState {
         self.focus.prefix_saved_focus = None;
         self.focus.layer_saved_focus = None;
         self.ime.reset_on_workspace_switch();
-        // Reset skeleton state for the new workspace (window manager drives this,
-        // not the effect trait).
-        {
-            let mut sk = self.skeleton.borrow_mut();
-            sk.set_enabled(false);
-            sk.clear();
-        }
-        self.skeleton_click_absorbed = false;
-        // Reset caret tracking so the jelly overlay doesn't animate from
-        // the previous workspace's caret position to the new one. The
-        // new workspace's Emacs will send fresh SetCursorRect messages
-        // after focus stabilizes.
-        let now = self.start_time.elapsed();
-        self.jelly_cursor.borrow_mut().update(None, now);
+        self.effects
+            .reset_on_workspace_switch(self.start_time.elapsed());
 
         if matches!(self.cursor_status, CursorImageStatus::Surface(_)) {
             self.cursor_status = CursorImageStatus::default_named();
@@ -944,15 +864,4 @@ pub struct ClientState {
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
-}
-
-/// Register an overlay into the chain and return a typed handle to the same
-/// instance. Lets `EmskinState::new` construct each overlay with one line.
-fn register_overlay<T: effect_core::Effect + 'static>(
-    chain: &mut effect_core::EffectChain,
-    value: T,
-) -> std::rc::Rc<std::cell::RefCell<T>> {
-    let rc = std::rc::Rc::new(std::cell::RefCell::new(value));
-    chain.register(effect_core::EffectHandle::new(rc.clone()));
-    rc
 }
