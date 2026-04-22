@@ -19,7 +19,7 @@ use smithay::{
         pointer::{CursorImageStatus, CursorImageSurfaceData},
     },
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
-    reexports::{calloop::EventLoop, wayland_server::Resource},
+    reexports::calloop::EventLoop,
     utils::{Logical, Physical, Rectangle, Size, Transform, SERIAL_COUNTER},
     wayland::compositor::with_states,
 };
@@ -60,10 +60,9 @@ fn apply_pending_state(state: &mut EmskinState, backend: &mut WinitGraphicsBacke
         backend.window().set_ime_allowed(enabled);
     }
 
-    if state.cursor_changed {
-        state.cursor_changed = false;
+    if let Some(status) = state.cursor.take_changed() {
         let window = backend.window();
-        match &state.cursor_status {
+        match status {
             CursorImageStatus::Named(icon) => {
                 window.set_cursor_visible(true);
                 window.set_cursor(winit_crate::window::Cursor::Icon(*icon));
@@ -164,11 +163,9 @@ fn render_frame(
 
         // Software cursor (topmost of extras): used for Surface cursors
         // (GTK3/Emacs) that can't be forwarded via winit's CursorIcon API.
-        if let CursorImageStatus::Surface(ref surface) = state.cursor_status {
-            if !surface.is_alive() {
-                state.cursor_status = CursorImageStatus::default_named();
-                state.cursor_changed = true;
-            } else if let Some(pointer) = state.seat.get_pointer() {
+        state.cursor.ensure_alive();
+        if let CursorImageStatus::Surface(surface) = state.cursor.status() {
+            if let Some(pointer) = state.seat.get_pointer() {
                 if let Err(e) = import_surface_tree(renderer, surface) {
                     tracing::warn!("cursor import_surface_tree failed: {e:?}");
                 } else {

@@ -8,7 +8,7 @@ use smithay::{
         pointer::{AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent},
     },
     reexports::wayland_server::Resource,
-    utils::{Point, SERIAL_COUNTER},
+    utils::SERIAL_COUNTER,
     wayland::{
         pointer_constraints::{with_pointer_constraint, PointerConstraint},
         seat::WaylandFocus,
@@ -99,10 +99,7 @@ impl EmskinState {
                 // zwp_relative_pointer_v1 — independent of
                 // `pointer.current_location()`, which freezes under a
                 // pointer lock while clients still need raw delta.
-                let delta = match self.last_pointer_raw_loc.replace(new_abs) {
-                    Some(prev) => new_abs - prev,
-                    None => Point::default(),
-                };
+                let delta = self.cursor.consume_raw_location(new_abs);
                 let time_msec = event.time_msec();
                 let new_under = self.surface_under(new_abs);
 

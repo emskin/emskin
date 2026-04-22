@@ -21,8 +21,7 @@ impl SeatHandler for EmskinState {
         _seat: &Seat<Self>,
         image: smithay::input::pointer::CursorImageStatus,
     ) {
-        self.cursor_status = image;
-        self.cursor_changed = true;
+        self.cursor.set_image(image);
         self.needs_redraw = true;
     }
 

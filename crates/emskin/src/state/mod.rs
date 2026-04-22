@@ -1,4 +1,5 @@
 pub mod apps;
+pub mod cursor;
 pub mod effects;
 pub mod focus;
 pub mod ime;
@@ -13,7 +14,7 @@ use std::{collections::HashMap, ffi::OsString, sync::Arc};
 use smithay::{
     backend::{renderer::gles::GlesRenderer, winit::WinitGraphicsBackend},
     desktop::{PopupManager, Space, Window, WindowSurfaceType},
-    input::{pointer::CursorImageStatus, Seat, SeatState},
+    input::{Seat, SeatState},
     reexports::{
         calloop::{
             generic::Generic, EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction,
@@ -220,18 +221,9 @@ pub struct EmskinState {
     /// a single cohesive module instead of eleven flat fields.
     pub effects: effects::EffectsState,
 
-    /// Current cursor image status. For Named, the host cursor is used;
-    /// for Surface (GTK3/Emacs), the cursor is software-rendered each frame.
-    pub cursor_status: CursorImageStatus,
-    /// Set when cursor_status changes; consumed by apply_pending_state.
-    pub cursor_changed: bool,
-
-    /// Last raw absolute pointer location from the host, in compositor
-    /// coords. Used to synthesize relative-motion deltas for
-    /// `zwp_relative_pointer_v1` (required by FPS games) — the winit
-    /// backend only emits absolute positions, so we diff consecutive
-    /// absolutes to produce the delta. `None` on first event.
-    pub last_pointer_raw_loc: Option<Point<f64, Logical>>,
+    /// Cursor image tracking (Named / Surface) + raw pointer location
+    /// for `zwp_relative_pointer_v1` delta synthesis.
+    pub cursor: cursor::CursorState,
 
     /// Coarse damage flag for structural events (IPC, layer shell, input,
     /// workspace switch) that smithay's per-element OutputDamageTracker does
@@ -360,9 +352,7 @@ impl EmskinState {
             focus: FocusState::default(),
             ime,
             effects: effects::EffectsState::default(),
-            cursor_status: CursorImageStatus::default_named(),
-            cursor_changed: false,
-            last_pointer_raw_loc: None,
+            cursor: cursor::CursorState::default(),
             needs_redraw: true,
             recorder: crate::recording::Recorder::new(),
         })
@@ -626,10 +616,7 @@ impl EmskinState {
         self.effects
             .reset_on_workspace_switch(self.start_time.elapsed());
 
-        if matches!(self.cursor_status, CursorImageStatus::Surface(_)) {
-            self.cursor_status = CursorImageStatus::default_named();
-            self.cursor_changed = true;
-        }
+        self.cursor.reset_on_workspace_switch();
 
         // Notify Emacs BEFORE changing keyboard focus. IPC is flushed
         // immediately (same syscall), while wl_keyboard.enter is buffered
