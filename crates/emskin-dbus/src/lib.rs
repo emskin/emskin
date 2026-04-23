@@ -17,4 +17,5 @@
 
 pub mod broker;
 pub mod dbus;
+pub mod fcitx;
 pub mod rules;
