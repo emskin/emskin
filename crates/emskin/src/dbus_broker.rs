@@ -307,7 +307,7 @@ impl DbusBroker {
         forwarded.extend_from_slice(&out.forward[..out.messages[0].offset]);
 
         for msg in &out.messages {
-            tracing::info!(
+            tracing::trace!(
                 member = msg.header.member.as_deref().unwrap_or(""),
                 interface = msg.header.interface.as_deref().unwrap_or(""),
                 signature = msg.header.signature.as_deref().unwrap_or(""),
@@ -471,7 +471,7 @@ impl DbusBroker {
             body: body_string(text),
         }
         .encode();
-        tracing::info!(?conn, ic_path, text, sender, "emit CommitString signal");
+        tracing::trace!(?conn, ic_path, text, sender, "emit CommitString signal");
         c.client_out.extend(bytes);
         Self::try_flush(&mut c.client, &mut c.client_out)
     }
@@ -502,7 +502,7 @@ impl DbusBroker {
             body: body_preedit(text, cursor.unwrap_or(-1)),
         }
         .encode();
-        tracing::info!(?conn, ic_path, text, sender, "emit UpdateFormattedPreedit signal");
+        tracing::trace!(?conn, ic_path, text, sender, "emit UpdateFormattedPreedit signal");
         c.client_out.extend(bytes);
         Self::try_flush(&mut c.client, &mut c.client_out)
     }
@@ -587,7 +587,7 @@ impl DbusBroker {
                         );
                         continue;
                     };
-                    tracing::info!(
+                    tracing::trace!(
                         ?id,
                         name = looked_up,
                         owner,
@@ -610,14 +610,14 @@ impl DbusBroker {
                         continue;
                     }
                     if new.is_empty() {
-                        tracing::info!(
+                        tracing::trace!(
                             ?id,
                             name,
                             "fcitx5 owner went away (NameOwnerChanged, new_owner empty)"
                         );
                         conn.fcitx_server_name = None;
                     } else {
-                        tracing::info!(
+                        tracing::trace!(
                             ?id,
                             name,
                             new_owner = new,
