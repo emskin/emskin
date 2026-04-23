@@ -58,17 +58,40 @@ impl DbusBridge {
         let listen_path = session_dir.join("bus.sock");
         let ctl_path = session_dir.join("ctl.sock");
 
-        // Detach the proxy's stdout/stderr from the parent's pipes. Without
-        // this, an orphaned proxy keeps the inherited stdout open and any
-        // tooling reading that pipe (test harnesses, shell wrappers like
-        // `cmd | tail`) hangs waiting for EOF long after the parent dies.
+        // Redirect the proxy's stdout/stderr into a session-local log file
+        // instead of the parent's pipes. File fds don't block pipe readers
+        // (test harnesses, `cmd | tail` wrappers) when the proxy outlives
+        // its parent briefly before PDEATHSIG, and we keep the tracing
+        // output for debugging. The log is recreated each run so it doesn't
+        // grow unbounded across emskin restarts.
+        let log_path = session_dir.join("proxy.log");
+        let stdout_target = match std::fs::File::create(&log_path) {
+            Ok(f) => match f.try_clone() {
+                Ok(clone) => Some((f, clone)),
+                Err(e) => {
+                    tracing::warn!(error = %e, ?log_path, "clone proxy log fd failed; logs disabled");
+                    None
+                }
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, ?log_path, "create proxy log file failed; logs disabled");
+                None
+            }
+        };
         let mut cmd = Command::new(&binary);
         cmd.env("EMSKIN_DBUS_PROXY_LISTEN", &listen_path)
             .env("EMSKIN_DBUS_PROXY_CTL", &ctl_path)
             .env("DBUS_SESSION_BUS_ADDRESS", &upstream_bus)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stdin(Stdio::null());
+        match stdout_target {
+            Some((stdout_file, stderr_file)) => {
+                cmd.stdout(Stdio::from(stdout_file))
+                    .stderr(Stdio::from(stderr_file));
+            }
+            None => {
+                cmd.stdout(Stdio::null()).stderr(Stdio::null());
+            }
+        }
         // Linux-only safety net: when the parent dies (SIGKILL from a test
         // harness, oom-kill, etc.) the kernel delivers SIGTERM to us so the
         // proxy self-reaps instead of being orphaned to PID 1.
@@ -119,6 +142,7 @@ impl DbusBridge {
         tracing::info!(
             ?listen_path,
             ?ctl_path,
+            ?log_path,
             upstream = %upstream_bus,
             "emskin-dbus-proxy spawned; bus injected into children"
         );

@@ -182,6 +182,16 @@ fn drive_client_to_bus(
             .client_feed(&buf[..n])
             .map_err(|e| std::io::Error::new(ErrorKind::InvalidData, e))?;
 
+        for msg in &out.messages {
+            tracing::debug!(
+                member = msg.header.member.as_deref().unwrap_or(""),
+                interface = msg.header.interface.as_deref().unwrap_or(""),
+                signature = msg.header.signature.as_deref().unwrap_or(""),
+                body_len = msg.header.body_len,
+                "client → bus message"
+            );
+        }
+
         if let Some(delta) = offset.get() {
             apply_cursor_rewrites(&mut out, delta);
         }
@@ -204,6 +214,9 @@ fn drive_bus_to_client(mut bus: UnixStream, mut client: UnixStream) -> std::io::
 }
 
 fn apply_cursor_rewrites(out: &mut crate::broker::state::Output, delta: (i32, i32)) {
+    if out.messages.is_empty() {
+        return;
+    }
     // Snapshot message descriptors so we can split-borrow `out.forward`
     // mutably in the loop body.
     let specs: Vec<(
@@ -229,7 +242,14 @@ fn apply_cursor_rewrites(out: &mut crate::broker::state::Output, delta: (i32, i3
     for (method, endian, start, end) in specs {
         if let Err(e) = cursor::apply_offset(method, endian, &mut out.forward[start..end], delta) {
             tracing::warn!(error = %e, "cursor rewrite skipped");
+            continue;
         }
+        tracing::info!(
+            ?method,
+            dx = delta.0,
+            dy = delta.1,
+            "cursor rewrite applied"
+        );
     }
 }
 
