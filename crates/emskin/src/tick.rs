@@ -104,18 +104,36 @@ pub fn event_loop_tick(state: &mut EmskinState) {
     }
 
     // --- DBus focus reconciliation ---
-    // Push the focused embedded app's emskin-space render-origin to the
-    // proxy so subsequent SetCursorRect / SetCursorLocation calls get
-    // translated from client-surface-local to emskin-local coords. The
-    // proxy's `SharedOffset` is idempotent — `push_rect` / `push_cleared`
-    // only write to the ctl socket when the rect actually changes.
+    // Push the focused embedded app's emskin-space origin to the
+    // broker so legacy SetCursorRect rewrites (dormant once fcitx5
+    // interception is on) have a valid offset, and drain any fcitx5
+    // events the broker observed this tick to drive winit IME.
     reconcile_dbus_focus(state);
+    drain_fcitx_events(state);
 }
 
 fn reconcile_dbus_focus(state: &mut EmskinState) {
     match focused_app_rect(state) {
         Some(rect) => state.dbus.push_rect(rect),
         None => state.dbus.push_cleared(),
+    }
+}
+
+/// Drain broker-observed fcitx5 events and hand them to the IME
+/// bridge. Each event is translated relative to the currently focused
+/// embedded app's emskin-space origin so the cursor rect reaches
+/// winit in emskin-winit-local coordinates.
+fn drain_fcitx_events(state: &mut EmskinState) {
+    let Some(broker) = state.dbus.broker.as_mut() else {
+        return;
+    };
+    let events = broker.drain_events();
+    if events.is_empty() {
+        return;
+    }
+    let origin = focused_app_rect(state).map(|r| [r[0], r[1]]);
+    for event in events {
+        state.ime.on_fcitx_event(event, origin);
     }
 }
 

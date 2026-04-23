@@ -67,6 +67,40 @@ pub fn body_string(s: &str) -> Body {
     }
 }
 
+/// `a(si)i` — fcitx5's `UpdateFormattedPreedit` signal body. An array
+/// of `(text_chunk, format_flags)` structs followed by the cursor
+/// position (in bytes within the preedit text).
+///
+/// Phase-1 emits a single chunk with flag 0 (no underline /
+/// highlight); finer-grained preedit formatting is a follow-up.
+pub fn body_preedit(text: &str, cursor: i32) -> Body {
+    let mut bytes = Vec::new();
+
+    // u32 array-byte-length placeholder; fill in once the array body
+    // is laid out.
+    bytes.extend_from_slice(&[0u8; 4]);
+    // First struct element is 8-aligned.
+    align(&mut bytes, 8);
+    let array_start = bytes.len();
+
+    // Struct `(si)`: string + i32.
+    write_string(&mut bytes, text);
+    align(&mut bytes, 4);
+    bytes.extend_from_slice(&0i32.to_le_bytes()); // fcitx5 `FormatFlag::NoFlag`
+
+    let array_len = (bytes.len() - array_start) as u32;
+    bytes[0..4].copy_from_slice(&array_len.to_le_bytes());
+
+    // Trailing `i` (cursor in byte offsets into `text`).
+    align(&mut bytes, 4);
+    bytes.extend_from_slice(&cursor.to_le_bytes());
+
+    Body {
+        signature: "a(si)i".into(),
+        bytes,
+    }
+}
+
 /// `(oay)` — struct of (object path, byte array). fcitx5's
 /// `InputMethod1.CreateInputContext` reply signature: the IC's D-Bus
 /// object path plus a 16-byte uuid that the client echoes back on
@@ -310,6 +344,27 @@ mod tests {
         assert_eq!(b.signature, "s");
         // 2, 0, 0, 0 | 'H', 'i' | 0
         assert_eq!(b.bytes, vec![2, 0, 0, 0, b'H', b'i', 0]);
+    }
+
+    #[test]
+    fn body_preedit_round_trips_through_parser() {
+        let b = body_preedit("ni", 2);
+        assert_eq!(b.signature, "a(si)i");
+        // Construct a full signal frame and verify the body_len via
+        // parse_header.
+        let frame = Signal {
+            our_serial: 1,
+            path: "/ic/7",
+            interface: "org.fcitx.Fcitx.InputContext1",
+            member: "UpdateFormattedPreedit",
+            destination: Some(":1.42"),
+            sender: None,
+            body: b,
+        }
+        .encode();
+        let hdr = parse_header(&frame).unwrap();
+        assert_eq!(hdr.member.as_deref(), Some("UpdateFormattedPreedit"));
+        assert_eq!(hdr.signature.as_deref(), Some("a(si)i"));
     }
 
     #[test]

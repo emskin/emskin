@@ -35,7 +35,10 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
 use emskin_dbus::broker::{apply_cursor_rewrites, state::ConnectionState};
-use emskin_dbus::fcitx::{self, FcitxMethod, IcRegistry};
+use emskin_dbus::dbus::encode::{body_preedit, body_string, Signal};
+use emskin_dbus::fcitx::{
+    self, reply::next_nonzero, FcitxMethod, IcRegistry, INPUT_CONTEXT_IFACE,
+};
 
 /// Newtype for per-connection id. Generated sequentially by the broker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -406,6 +409,63 @@ impl DbusBroker {
     /// empties the internal queue.
     pub fn drain_events(&mut self) -> Vec<FcitxEvent> {
         std::mem::take(&mut self.events)
+    }
+
+    /// Send an `org.fcitx.Fcitx.InputContext1.CommitString(s)` signal to
+    /// the given connection's client, targeted at `ic_path`. Used by
+    /// emskin's winit IME handler to relay `Ime::Commit` text back to
+    /// the DBus client that owns the active IC.
+    pub fn emit_commit_string(
+        &mut self,
+        conn: ConnId,
+        ic_path: &str,
+        text: &str,
+    ) -> io::Result<()> {
+        let Some(c) = self.connections.get_mut(&conn) else {
+            return Ok(());
+        };
+        let serial = next_nonzero(&mut c.serial_counter);
+        let bytes = Signal {
+            our_serial: serial,
+            path: ic_path,
+            interface: INPUT_CONTEXT_IFACE,
+            member: "CommitString",
+            destination: None,
+            sender: None,
+            body: body_string(text),
+        }
+        .encode();
+        c.client_out.extend(bytes);
+        Self::try_flush(&mut c.client, &mut c.client_out)
+    }
+
+    /// Send an `org.fcitx.Fcitx.InputContext1.UpdateFormattedPreedit(a(si)i)`
+    /// signal — relays `Ime::Preedit` back to the DBus client so it can
+    /// render inline preedit. A `None` `cursor` omits the cursor
+    /// position (encoded as `-1`).
+    pub fn emit_preedit(
+        &mut self,
+        conn: ConnId,
+        ic_path: &str,
+        text: &str,
+        cursor: Option<i32>,
+    ) -> io::Result<()> {
+        let Some(c) = self.connections.get_mut(&conn) else {
+            return Ok(());
+        };
+        let serial = next_nonzero(&mut c.serial_counter);
+        let bytes = Signal {
+            our_serial: serial,
+            path: ic_path,
+            interface: INPUT_CONTEXT_IFACE,
+            member: "UpdateFormattedPreedit",
+            destination: None,
+            sender: None,
+            body: body_preedit(text, cursor.unwrap_or(-1)),
+        }
+        .encode();
+        c.client_out.extend(bytes);
+        Self::try_flush(&mut c.client, &mut c.client_out)
     }
 
     /// Upstream → client pump. Raw pass-through (phase 1 doesn't inspect

@@ -150,7 +150,7 @@ pub fn build_reply(
 
 /// Increment `counter`, skipping zero (DBus spec requires non-zero
 /// serials). Wraps around `u32::MAX` → 1 to stay positive.
-fn next_nonzero(counter: &mut u32) -> u32 {
+pub fn next_nonzero(counter: &mut u32) -> u32 {
     *counter = counter.wrapping_add(1);
     if *counter == 0 {
         *counter = 1;
