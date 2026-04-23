@@ -1,5 +1,6 @@
 pub mod apps;
 pub mod cursor;
+pub mod dbus;
 pub mod effects;
 pub mod emacs;
 pub mod focus;
@@ -216,6 +217,12 @@ pub struct EmskinState {
     /// Screenshot / screen-record state machine. Driven by IPC
     /// (`TakeScreenshot { path }`) and consumed by the winit render loop.
     pub recorder: crate::recording::Recorder,
+
+    /// Bridge to the child `emskin-dbus-proxy` process that rewrites IME
+    /// cursor-position calls for embedded apps. Populated in `main.rs`
+    /// after `init_winit`; stays [`DbusBridge::default`] (inert) if the
+    /// proxy binary is missing or the host has no session bus.
+    pub dbus: dbus::DbusBridge,
 }
 
 impl EmskinState {
@@ -331,6 +338,7 @@ impl EmskinState {
             cursor: cursor::CursorState::default(),
             needs_redraw: true,
             recorder: crate::recording::Recorder::new(),
+            dbus: dbus::DbusBridge::default(),
         })
     }
 

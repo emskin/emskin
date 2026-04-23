@@ -14,6 +14,7 @@ description = "Nested Wayland compositor for Emacs"
 effect-core = { path = "../effect-core" }
 effect-plugins = { path = "../effect-plugins" }
 emskin-clipboard = { path = "../emskin-clipboard" }
+emskin-dbus = { path = "../emskin-dbus" }
 smithay.workspace = true
 cosmic-text.workspace = true
 serde.workspace = true

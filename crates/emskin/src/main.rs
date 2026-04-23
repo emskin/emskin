@@ -176,6 +176,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("EMSKIN_DISABLE_HOST_CLIPBOARD set; host clipboard sync disabled");
     }
 
+    // Spawn emskin-dbus-proxy before any child processes; its `Ready` ack
+    // arrives before `inject_env` is invoked by `spawn_child` / `spawn_bar`.
+    // A missing binary or absent host session bus downgrades the bridge to
+    // an inert state — embedded IME popups will then land wherever they
+    // always did (no regression vs. pre-proxy behavior).
+    state.dbus = state::dbus::DbusBridge::spawn_and_connect();
+
     if !cli.no_spawn {
         state.xwayland.set_pending_command(state::PendingCommand {
             command: cli.command.clone(),
@@ -210,6 +217,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = child.kill();
         let _ = child.wait();
     }
+    // emskin-dbus-proxy: send Shutdown then reap so the bus socket gets
+    // unlinked and the session dir is removed.
+    state.dbus.shutdown();
 
     // Clean up extracted elisp files
     if let Some(ref dir) = state.elisp_dir {
@@ -281,17 +291,18 @@ fn spawn_child(
     tracing::info!(
         "Spawning: {command} {full_args:?} (WAYLAND_DISPLAY={socket_name} DISPLAY=:{x_display})"
     );
-    match std::process::Command::new(command)
-        .args(&full_args)
+    let mut cmd = std::process::Command::new(command);
+    cmd.args(&full_args)
         .env("WAYLAND_DISPLAY", socket_name)
         .env("DISPLAY", format!(":{x_display}"))
         // Ensure child apps prefer Wayland even when host is X11.
         .env("XDG_SESSION_TYPE", "wayland")
-        .env("XDG_SESSION_DESKTOP", "emskin")
-        // .env("GTK_IM_MODULE","wayland")
-        // .env("QT_IM_MODULE","wayland")
-        .spawn()
-    {
+        .env("XDG_SESSION_DESKTOP", "emskin");
+    // Redirect the session bus through emskin-dbus-proxy (if running) so
+    // embedded apps' IME cursor-position calls are translated into
+    // emskin-local coordinates before they reach fcitx5 on the host.
+    state.dbus.inject_env(&mut cmd);
+    match cmd.spawn() {
         Ok(child) => state.emacs.set_child(child),
         Err(e) => tracing::error!("Failed to spawn '{command}': {e}"),
     }
@@ -335,10 +346,10 @@ fn spawn_bar(mode: &str, state: &mut EmskinState) {
         "Spawning workspace bar: {} (WAYLAND_DISPLAY={socket_name})",
         binary.display(),
     );
-    match std::process::Command::new(&binary)
-        .env("WAYLAND_DISPLAY", socket_name)
-        .spawn()
-    {
+    let mut cmd = std::process::Command::new(&binary);
+    cmd.env("WAYLAND_DISPLAY", socket_name);
+    state.dbus.inject_env(&mut cmd);
+    match cmd.spawn() {
         Ok(child) => state.bar_child = Some(child),
         Err(e) => {
             tracing::warn!("Failed to spawn bar {}: {e}", binary.display());

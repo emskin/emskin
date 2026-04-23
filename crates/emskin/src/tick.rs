@@ -1,6 +1,7 @@
 //! Event loop tick — the per-frame idle callback for the compositor.
 
 use smithay::reexports::wayland_server::Resource;
+use smithay::wayland::seat::WaylandFocus;
 
 use crate::ipc::OutgoingMessage;
 use crate::state::EmskinState;
@@ -24,6 +25,19 @@ pub fn event_loop_tick(state: &mut EmskinState) {
         if let Ok(Some(status)) = child.try_wait() {
             tracing::warn!("emskin-bar exited with {status}");
             state.bar_child = None;
+        }
+    }
+
+    // --- Reap the emskin-dbus-proxy child if it exited ---
+    // Same rationale as the bar — non-critical, loss means IME cursor
+    // coords won't be rewritten but other traffic is unaffected. On exit
+    // we also drop the ctl client so push_rect / push_cleared no-op.
+    if let Some(ref mut child) = state.dbus.proxy_child {
+        if let Ok(Some(status)) = child.try_wait() {
+            tracing::warn!("emskin-dbus-proxy exited with {status}");
+            state.dbus.proxy_child = None;
+            state.dbus.ctl = None;
+            state.dbus.listen_path = None;
         }
     }
 
@@ -101,6 +115,44 @@ pub fn event_loop_tick(state: &mut EmskinState) {
         }
         tracing::debug!("embedded app window_id={window_id} geometry force-committed (timeout)");
     }
+
+    // --- DBus focus reconciliation ---
+    // Push the focused embedded app's emskin-space render-origin to the
+    // proxy so subsequent SetCursorRect / SetCursorLocation calls get
+    // translated from client-surface-local to emskin-local coords. The
+    // proxy's `SharedOffset` is idempotent — `push_rect` / `push_cleared`
+    // only write to the ctl socket when the rect actually changes.
+    reconcile_dbus_focus(state);
+}
+
+fn reconcile_dbus_focus(state: &mut EmskinState) {
+    match focused_app_rect(state) {
+        Some(rect) => state.dbus.push_rect(rect),
+        None => state.dbus.push_cleared(),
+    }
+}
+
+fn focused_app_rect(state: &EmskinState) -> Option<emskin_dbus::protocol::Rect> {
+    let kb = state.seat.get_keyboard()?;
+    let focus = kb.current_focus()?;
+    let window = match focus {
+        crate::state::KeyboardFocusTarget::Window(w) => w,
+        _ => return None,
+    };
+    let surface = window.wl_surface()?;
+    // Emacs is the host — IME for Emacs itself is handled via text_input_v3
+    // in emskin directly, not via the DBus IM path we're rewriting.
+    if state.emacs.is_main_surface(&surface) {
+        return None;
+    }
+    // Visible top-left of the window's buffer in space coords. DBus clients
+    // report caret coordinates relative to the buffer origin (wl_surface
+    // local, which includes any CSD shadow), so we match that frame by
+    // subtracting the `geometry().loc` CSD offset from the element
+    // location, same convention as `Space::render_location`.
+    let loc = state.workspace.active_space.element_location(&window)?;
+    let geo_offset = window.geometry().loc;
+    Some([loc.x - geo_offset.x, loc.y - geo_offset.y, 0, 0])
 }
 
 fn process_pending_toplevels(state: &mut EmskinState) {
