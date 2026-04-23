@@ -753,11 +753,12 @@ mod tests {
         let upstream_got = drain(&mut upstream_peer);
         assert_eq!(upstream_got, handshake);
 
-        // Client: method_return with (oay) signature.
+        // Client: method_return with `oay` signature (two top-level
+        // args — object path + byte array — not a struct).
         let client_got = drain(&mut client);
         let hdr = emskin_dbus::dbus::message::parse_header(&client_got).unwrap();
         assert_eq!(hdr.reply_serial, Some(42));
-        assert_eq!(hdr.signature.as_deref(), Some("(oay)"));
+        assert_eq!(hdr.signature.as_deref(), Some("oay"));
 
         broker.remove_connection(id);
     }

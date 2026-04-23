@@ -101,22 +101,24 @@ pub fn body_preedit(text: &str, cursor: i32) -> Body {
     }
 }
 
-/// `(oay)` — struct of (object path, byte array). fcitx5's
-/// `InputMethod1.CreateInputContext` reply signature: the IC's D-Bus
-/// object path plus a 16-byte uuid that the client echoes back on
-/// subsequent calls.
+/// `oay` — two top-level args: an object path and a byte array.
+/// fcitx5's `InputMethod1.CreateInputContext` reply signature: the
+/// IC's DBus object path followed by a 16-byte uuid that the client
+/// echoes back on subsequent calls.
+///
+/// Note the signature is `oay` **not** `(oay)` — fcitx5 returns two
+/// independent args, not a struct. Wrapping them in a struct trips
+/// strict DBus decoders (GDBus, Qt DBus), which is how WeChat's GTK
+/// IM module silently drops the reply if we get this wrong.
 pub fn body_oay(object_path: &str, byte_array: &[u8]) -> Body {
     let mut bytes = Vec::new();
-    // Struct at body offset 0 is 8-aligned by construction. Inside the
-    // struct, each field aligns per its own type:
-    //   o: aligns to 4 (u32 length)
-    //   ay: aligns to 4 (u32 length); array body after alignment to 1
-    //       (byte alignment).
+    // Arg 1: `o` at offset 0, aligned to 4 (u32 length prefix).
     write_object_path(&mut bytes, object_path);
+    // Arg 2: `ay` aligns to 4 (u32 length prefix).
     align(&mut bytes, 4);
     write_byte_array(&mut bytes, byte_array);
     Body {
-        signature: "(oay)".into(),
+        signature: "oay".into(),
         bytes,
     }
 }
@@ -370,7 +372,7 @@ mod tests {
     #[test]
     fn body_oay_packs_path_and_byte_array() {
         let b = body_oay("/a", &[0xDE, 0xAD, 0xBE, 0xEF]);
-        assert_eq!(b.signature, "(oay)");
+        assert_eq!(b.signature, "oay");
         // path: len=1, "/a", NUL   [4 bytes len][2 bytes "/a"][1 byte NUL]
         // align to 4 after NUL — that's already at 8, no pad
         // array: len=4 (4 bytes LE), then 4 bytes
@@ -489,7 +491,7 @@ mod tests {
         }
         .encode();
         let hdr = parse_header(&msg).unwrap();
-        assert_eq!(hdr.signature.as_deref(), Some("(oay)"));
+        assert_eq!(hdr.signature.as_deref(), Some("oay"));
         // Body: 4 (path_len) + 38 (path) + 1 (NUL) + 1 (pad 43→44 for
         //       the array length's 4-byte alignment) + 4 (array_len)
         //       + 16 (uuid) = 64.

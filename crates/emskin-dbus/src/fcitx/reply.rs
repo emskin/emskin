@@ -212,7 +212,7 @@ mod tests {
         assert_eq!(hdr.reply_serial, Some(42));
         assert_eq!(hdr.destination.as_deref(), Some(":1.100"));
         assert_eq!(hdr.sender.as_deref(), Some("org.fcitx.Fcitx5"));
-        assert_eq!(hdr.signature.as_deref(), Some("(oay)"));
+        assert_eq!(hdr.signature.as_deref(), Some("oay"));
         // And the registry should now hold the IC.
         assert_eq!(reg.len(), 1);
     }
