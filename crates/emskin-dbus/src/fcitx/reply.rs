@@ -1,93 +1,62 @@
-//! Reply synthesis for intercepted fcitx5 method_calls.
+//! Synthesize method_return frames for intercepted fcitx5 method_calls.
 //!
-//! Given a parsed request header + classified [`FcitxMethod`], build
-//! the bytes the broker should write back to the client. The broker
-//! doesn't forward the request to the real fcitx5 once we're in this
-//! code path.
+//! Given a parsed request [`Frame`] + classified [`FcitxMethod`], build
+//! the bytes the broker writes back to the client. The broker doesn't
+//! forward the request to the real fcitx5 once we're in this code path.
 
-use crate::dbus::encode::{body_bool, body_empty, body_oay, MethodReturn};
-use crate::dbus::message::Header;
+use zvariant::ObjectPath;
+
+use crate::dbus::frame::Frame;
 
 use super::classify::FcitxMethod;
 use super::ic::IcRegistry;
 
-/// Mint a synthetic method_return for `method`.
+/// Mint a synthetic method_return for `method`, encode to wire bytes.
 ///
-/// Mutates `registry` for `CreateInputContext` (allocates a new IC)
-/// and `DestroyIC` (frees one). All other variants are read-only.
+/// Mutates `registry` for `CreateInputContext` (allocates a new IC) and
+/// `DestroyIC` (frees one); other variants update in-place IC state.
 ///
 /// `serial_counter` is the broker's per-connection outgoing serial
-/// counter — incremented for every reply + signal we send on that
-/// connection. The DBus spec requires non-zero serials so callers
-/// should initialize it to 1.
+/// counter — the DBus spec requires non-zero serials, so callers should
+/// initialize to 1 and let [`next_nonzero`] do the housekeeping.
 pub fn build_reply(
-    request: &Header,
+    request: &Frame<'_>,
     method: &FcitxMethod,
     registry: &mut IcRegistry,
     serial_counter: &mut u32,
 ) -> Vec<u8> {
-    let our_serial = next_nonzero(serial_counter);
-    // Where should the reply say it came *from*? The request's
-    // `destination` is the fcitx5 well-known or unique name — echoing
-    // it back as `sender` keeps clients that filter by sender happy.
-    let sender = request.destination.as_deref();
-    // Where does the reply go? The request's `sender` (the client's
-    // unique bus name, e.g. ":1.42"). For clients that dialed via the
-    // broker directly (no unique name yet), this is `None` — DBus
-    // clients match on reply_serial in that case.
-    let destination = request.sender.as_deref();
-    let reply_to_serial = request.serial;
+    let serial = next_nonzero(serial_counter);
 
-    match method {
+    let frame = match method {
         FcitxMethod::CreateInputContext { .. } => {
             let (path, state) = registry.allocate();
-            MethodReturn {
-                our_serial,
-                reply_to_serial,
-                destination,
-                sender,
-                body: body_oay(&path, &state.uuid),
-            }
-            .encode()
+            let object_path =
+                ObjectPath::try_from(path.as_str()).expect("registry produces valid path");
+            // Reply signature `oay` is two top-level args, not a struct.
+            // Wrapping `(oay)` as a struct trips strict DBus decoders
+            // (GDBus, Qt DBus) — that's how WeChat silently drops the
+            // reply when this is wrong.
+            Frame::method_return(request)
+                .serial(serial)
+                .body_args()
+                .arg(&object_path)
+                .arg(&state.uuid.to_vec())
+                .done()
+                .build()
         }
-        FcitxMethod::ProcessKeyEvent { .. } => MethodReturn {
-            our_serial,
-            reply_to_serial,
-            destination,
-            sender,
-            // `false` — key not consumed by (fake) fcitx5. The real
-            // host fcitx5 consumes IME keys via emskin's winit IC
-            // before they reach WeChat; anything that does reach
-            // WeChat and flows back as ProcessKeyEvent is by
-            // definition a non-IME key, which should pass through to
-            // the client widget.
-            body: body_bool(false),
-        }
-        .encode(),
+
         FcitxMethod::DestroyIC { ic_path } => {
             registry.destroy(ic_path);
-            MethodReturn {
-                our_serial,
-                reply_to_serial,
-                destination,
-                sender,
-                body: body_empty(),
-            }
-            .encode()
+            Frame::method_return(request).serial(serial).build()
         }
+
         FcitxMethod::FocusIn { ic_path } | FcitxMethod::FocusOut { ic_path } => {
             if let Some(st) = registry.get_mut(ic_path) {
                 st.focused = matches!(method, FcitxMethod::FocusIn { .. });
             }
-            MethodReturn {
-                our_serial,
-                reply_to_serial,
-                destination,
-                sender,
-                body: body_empty(),
-            }
-            .encode()
+            Frame::method_return(request).serial(serial).build()
         }
+
         FcitxMethod::SetCapability {
             ic_path,
             capability,
@@ -95,15 +64,9 @@ pub fn build_reply(
             if let Some(st) = registry.get_mut(ic_path) {
                 st.capability = *capability;
             }
-            MethodReturn {
-                our_serial,
-                reply_to_serial,
-                destination,
-                sender,
-                body: body_empty(),
-            }
-            .encode()
+            Frame::method_return(request).serial(serial).build()
         }
+
         FcitxMethod::SetCursorRect {
             ic_path, x, y, w, h,
         }
@@ -113,43 +76,28 @@ pub fn build_reply(
             if let Some(st) = registry.get_mut(ic_path) {
                 st.cursor_rect = Some([*x, *y, *w, *h]);
             }
-            MethodReturn {
-                our_serial,
-                reply_to_serial,
-                destination,
-                sender,
-                body: body_empty(),
-            }
-            .encode()
+            Frame::method_return(request).serial(serial).build()
         }
+
         FcitxMethod::SetCursorLocation { ic_path, x, y } => {
             if let Some(st) = registry.get_mut(ic_path) {
                 st.cursor_rect = Some([*x, *y, 0, 0]);
             }
-            MethodReturn {
-                our_serial,
-                reply_to_serial,
-                destination,
-                sender,
-                body: body_empty(),
-            }
-            .encode()
+            Frame::method_return(request).serial(serial).build()
         }
+
         FcitxMethod::Reset { .. }
         | FcitxMethod::SetSurroundingText { .. }
-        | FcitxMethod::SetSurroundingTextPosition { .. } => MethodReturn {
-            our_serial,
-            reply_to_serial,
-            destination,
-            sender,
-            body: body_empty(),
+        | FcitxMethod::SetSurroundingTextPosition { .. } => {
+            Frame::method_return(request).serial(serial).build()
         }
-        .encode(),
-    }
+    };
+
+    frame.encode()
 }
 
 /// Increment `counter`, skipping zero (DBus spec requires non-zero
-/// serials). Wraps around `u32::MAX` → 1 to stay positive.
+/// serials). Wraps `u32::MAX` → 1 to stay positive.
 pub fn next_nonzero(counter: &mut u32) -> u32 {
     *counter = counter.wrapping_add(1);
     if *counter == 0 {
@@ -161,133 +109,88 @@ pub fn next_nonzero(counter: &mut u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dbus::message::{parse_header, Endian, MessageType};
+    use crate::dbus::frame::{Frame, Kind};
 
-    fn request(
-        member: &str,
-        sig: &str,
-        path: &str,
-        serial: u32,
-        destination: &str,
-        sender: &str,
-    ) -> Header {
-        Header {
-            endian: Endian::Little,
-            msg_type: MessageType::MethodCall,
-            flags: 0,
-            body_len: 0,
-            serial,
-            path: Some(path.into()),
-            interface: Some("org.fcitx.Fcitx.InputContext1".into()),
-            member: Some(member.into()),
-            error_name: None,
-            destination: Some(destination.into()),
-            sender: Some(sender.into()),
-            signature: Some(sig.into()),
-            reply_serial: None,
-            unix_fds: None,
-        }
+    fn create_input_context_request(serial: u32) -> Vec<u8> {
+        let hints: Vec<(String, String)> = Vec::new();
+        let mut frame = Frame::signal(
+            "/org/freedesktop/portal/inputmethod",
+            "org.fcitx.Fcitx.InputMethod1",
+            "CreateInputContext",
+        )
+        .serial(serial)
+        .destination("org.fcitx.Fcitx5")
+        .sender(":1.42")
+        .body(&hints)
+        .build();
+        frame.kind = Kind::MethodCall;
+        frame.encode()
+    }
+
+    fn empty_request(member: &str, path: &str, serial: u32) -> Vec<u8> {
+        let mut frame = Frame::signal(path, "org.fcitx.Fcitx.InputContext1", member)
+            .serial(serial)
+            .destination("org.fcitx.Fcitx5")
+            .sender(":1.42")
+            .build();
+        frame.kind = Kind::MethodCall;
+        frame.encode()
     }
 
     #[test]
-    fn create_input_context_allocates_and_returns_oay() {
-        let req = request(
-            "CreateInputContext",
-            "a(ss)",
-            "/org/freedesktop/portal/inputmethod",
-            42,
-            "org.fcitx.Fcitx5",
-            ":1.100",
-        );
+    fn create_input_context_returns_oay_with_swapped_endpoints() {
+        let bytes = create_input_context_request(42);
+        let request = Frame::parse(&bytes).unwrap();
         let mut reg = IcRegistry::new();
         let mut serial = 0;
-        let bytes = build_reply(
-            &req,
+        let reply_bytes = build_reply(
+            &request,
             &FcitxMethod::CreateInputContext { hints: vec![] },
             &mut reg,
             &mut serial,
         );
-        let hdr = parse_header(&bytes).unwrap();
-        assert_eq!(hdr.msg_type, MessageType::MethodReturn);
-        assert_eq!(hdr.reply_serial, Some(42));
-        assert_eq!(hdr.destination.as_deref(), Some(":1.100"));
-        assert_eq!(hdr.sender.as_deref(), Some("org.fcitx.Fcitx5"));
-        assert_eq!(hdr.signature.as_deref(), Some("oay"));
-        // And the registry should now hold the IC.
+        let reply = Frame::parse(&reply_bytes).unwrap();
+        assert_eq!(reply.kind, Kind::MethodReturn);
+        assert_eq!(reply.fields.reply_serial, Some(42));
+        // sender/destination swapped — reply originates from the bus the
+        // request was destined for.
+        assert_eq!(reply.fields.destination.as_deref(), Some(":1.42"));
+        assert_eq!(reply.fields.sender.as_deref(), Some("org.fcitx.Fcitx5"));
+        assert_eq!(reply.fields.signature.as_deref(), Some("oay"));
         assert_eq!(reg.len(), 1);
     }
 
     #[test]
-    fn process_key_event_returns_false() {
-        let req = request(
-            "ProcessKeyEvent",
-            "uubuu",
-            "/org/freedesktop/portal/inputcontext/1",
-            7,
-            "org.fcitx.Fcitx5",
-            ":1.42",
-        );
-        let mut reg = IcRegistry::new();
-        reg.allocate(); // so the IC exists
-        let mut serial = 0;
-        let bytes = build_reply(
-            &req,
-            &FcitxMethod::ProcessKeyEvent {
-                ic_path: "/org/freedesktop/portal/inputcontext/1".into(),
-                keyval: 0x61,
-                keycode: 38,
-                state: 0,
-                is_release: false,
-                time: 0,
-            },
-            &mut reg,
-            &mut serial,
-        );
-        let hdr = parse_header(&bytes).unwrap();
-        assert_eq!(hdr.msg_type, MessageType::MethodReturn);
-        assert_eq!(hdr.signature.as_deref(), Some("b"));
-        assert_eq!(hdr.body_len, 4);
-        // Body: u32 LE, `false` = 0
-        let body_start = bytes.len() - 4;
-        assert_eq!(&bytes[body_start..], &[0, 0, 0, 0]);
-    }
-
-    #[test]
     fn focus_in_updates_registry_and_returns_empty() {
-        let req = request(
-            "FocusIn",
-            "",
-            "/ic/1",
-            1,
-            "org.fcitx.Fcitx5",
-            ":1.42",
-        );
         let mut reg = IcRegistry::new();
         let (path, _) = reg.allocate();
+        let bytes = empty_request("FocusIn", &path, 1);
+        let request = Frame::parse(&bytes).unwrap();
         let mut serial = 0;
-        let bytes = build_reply(
-            &req,
+        let reply_bytes = build_reply(
+            &request,
             &FcitxMethod::FocusIn {
                 ic_path: path.clone(),
             },
             &mut reg,
             &mut serial,
         );
-        let hdr = parse_header(&bytes).unwrap();
-        assert_eq!(hdr.msg_type, MessageType::MethodReturn);
-        assert_eq!(hdr.body_len, 0);
+        let reply = Frame::parse(&reply_bytes).unwrap();
+        assert_eq!(reply.kind, Kind::MethodReturn);
+        assert_eq!(reply.body.len(), 0);
         assert!(reg.get(&path).unwrap().focused);
     }
 
     #[test]
     fn focus_out_clears_focused_flag() {
-        let req = request("FocusOut", "", "/ic/1", 1, "org.fcitx.Fcitx5", ":1.42");
         let mut reg = IcRegistry::new();
         let (path, _) = reg.allocate();
         reg.get_mut(&path).unwrap().focused = true;
+        let bytes = empty_request("FocusOut", &path, 1);
+        let request = Frame::parse(&bytes).unwrap();
         let mut serial = 0;
         build_reply(
-            &req,
+            &request,
             &FcitxMethod::FocusOut {
                 ic_path: path.clone(),
             },
@@ -299,13 +202,13 @@ mod tests {
 
     #[test]
     fn destroy_ic_removes_from_registry() {
-        let req = request("DestroyIC", "", "/ic/1", 1, "org.fcitx.Fcitx5", ":1.42");
         let mut reg = IcRegistry::new();
         let (path, _) = reg.allocate();
-        assert_eq!(reg.len(), 1);
+        let bytes = empty_request("DestroyIC", &path, 1);
+        let request = Frame::parse(&bytes).unwrap();
         let mut serial = 0;
         build_reply(
-            &req,
+            &request,
             &FcitxMethod::DestroyIC { ic_path: path },
             &mut reg,
             &mut serial,
@@ -314,20 +217,14 @@ mod tests {
     }
 
     #[test]
-    fn set_cursor_rect_v2_stores_rect_and_returns_empty() {
-        let req = request(
-            "SetCursorRectV2",
-            "iiiid",
-            "/ic/1",
-            1,
-            "org.fcitx.Fcitx5",
-            ":1.42",
-        );
+    fn set_cursor_rect_v2_stores_rect() {
         let mut reg = IcRegistry::new();
         let (path, _) = reg.allocate();
+        let bytes = empty_request("SetCursorRectV2", &path, 1);
+        let request = Frame::parse(&bytes).unwrap();
         let mut serial = 0;
-        let bytes = build_reply(
-            &req,
+        build_reply(
+            &request,
             &FcitxMethod::SetCursorRectV2 {
                 ic_path: path.clone(),
                 x: 100,
@@ -339,16 +236,13 @@ mod tests {
             &mut reg,
             &mut serial,
         );
-        let hdr = parse_header(&bytes).unwrap();
-        assert_eq!(hdr.body_len, 0);
         assert_eq!(reg.get(&path).unwrap().cursor_rect, Some([100, 200, 10, 20]));
     }
 
     #[test]
     fn serial_counter_skips_zero_on_wrap() {
         let mut c: u32 = u32::MAX;
-        let s = next_nonzero(&mut c);
-        assert_eq!(s, 1);
+        assert_eq!(next_nonzero(&mut c), 1);
         assert_eq!(c, 1);
     }
 

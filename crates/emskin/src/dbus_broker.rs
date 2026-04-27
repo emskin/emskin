@@ -35,8 +35,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
 use emskin_dbus::broker::state::ConnectionState;
-use emskin_dbus::dbus::encode::{body_preedit, body_string, Signal};
-use emskin_dbus::dbus::message::{bytes_needed, parse_header, Endian, MessageType};
+use emskin_dbus::dbus::frame::{Frame, Kind};
 use emskin_dbus::fcitx::{self, reply::next_nonzero, FcitxMethod, IcRegistry, INPUT_CONTEXT_IFACE};
 
 /// Sender name we stamp on synthesized signals. GDBus (and most other
@@ -307,39 +306,43 @@ impl DbusBroker {
         forwarded.extend_from_slice(&out.forward[..out.messages[0].offset]);
 
         for msg in &out.messages {
+            let msg_bytes = &out.forward[msg.range()];
+            let frame = match Frame::parse(msg_bytes) {
+                Ok(f) => f,
+                Err(e) => {
+                    tracing::warn!(?id, error = %e, "failed to parse client → bus frame; forwarding verbatim");
+                    forwarded.extend_from_slice(msg_bytes);
+                    continue;
+                }
+            };
             tracing::trace!(
-                member = msg.header.member.as_deref().unwrap_or(""),
-                interface = msg.header.interface.as_deref().unwrap_or(""),
-                signature = msg.header.signature.as_deref().unwrap_or(""),
-                destination = msg.header.destination.as_deref().unwrap_or(""),
-                body_len = msg.header.body_len,
+                member = frame.fields.member.as_deref().unwrap_or(""),
+                interface = frame.fields.interface.as_deref().unwrap_or(""),
+                signature = frame.fields.signature.as_deref().unwrap_or(""),
+                destination = frame.fields.destination.as_deref().unwrap_or(""),
+                body_len = frame.body.len(),
                 "client → bus message"
             );
-
-            let msg_bytes = &out.forward[msg.offset..msg.offset + msg.length];
-            let body_start_in_msg = msg.length - msg.header.body_len as usize;
-            let body = &msg_bytes[body_start_in_msg..];
 
             // Track outgoing `org.freedesktop.DBus.GetNameOwner(s)`
             // requests that ask about a fcitx5 well-known name. When
             // the matching reply comes back from upstream we'll learn
             // the unique owner and cache it as our signal sender.
-            if is_get_name_owner_method(&msg.header) {
-                if let Some(name) = parse_arg0_string(body, msg.header.endian) {
+            if is_get_name_owner_method(&frame) {
+                if let Some(name) = frame.decode_body::<String>() {
                     if fcitx::is_fcitx_well_known(&name) {
                         tracing::debug!(
                             ?id,
-                            serial = msg.header.serial,
+                            serial = frame.serial,
                             name,
                             "tracking GetNameOwner for fcitx5 name"
                         );
-                        conn.pending_name_lookups
-                            .insert(msg.header.serial, name);
+                        conn.pending_name_lookups.insert(frame.serial, name);
                     }
                 }
             }
 
-            if let Some(fm) = fcitx::classify(&msg.header, body) {
+            if let Some(fm) = fcitx::classify(&frame) {
                 // Capture the destination the client used as a
                 // fallback signal-sender source — the upstream
                 // GetNameOwner parse in `pump_upstream_to_client` is
@@ -347,7 +350,7 @@ impl DbusBroker {
                 // land (e.g. the client skipped GetNameOwner and just
                 // used the well-known), the destination field of an
                 // intercepted call still tells us the unique name.
-                if let Some(dest) = msg.header.destination.as_deref() {
+                if let Some(dest) = frame.fields.destination.as_deref() {
                     if dest.starts_with(':') && conn.fcitx_server_name.as_deref() != Some(dest) {
                         tracing::debug!(
                             ?id,
@@ -358,7 +361,7 @@ impl DbusBroker {
                     }
                 }
                 let reply = fcitx::build_reply(
-                    &msg.header,
+                    &frame,
                     &fm,
                     &mut conn.ic_registry,
                     &mut conn.serial_counter,
@@ -367,7 +370,7 @@ impl DbusBroker {
                 Self::emit_fcitx_event(events, id, &fm, &conn.ic_registry);
                 tracing::debug!(
                     ?id,
-                    member = msg.header.member.as_deref().unwrap_or(""),
+                    member = frame.fields.member.as_deref().unwrap_or(""),
                     "intercepted fcitx5 method_call; reply queued"
                 );
                 continue;
@@ -413,15 +416,36 @@ impl DbusBroker {
                 });
             }
             FcitxMethod::SetCursorRect {
-                ic_path, x, y, w, h,
-            }
-            | FcitxMethod::SetCursorRectV2 {
-                ic_path, x, y, w, h, ..
+                ic_path,
+                x,
+                y,
+                w,
+                h,
             } => events.push(FcitxEvent::CursorRect {
                 conn,
                 ic_path: ic_path.clone(),
                 rect: [*x, *y, *w, *h],
             }),
+            FcitxMethod::SetCursorRectV2 {
+                ic_path,
+                x,
+                y,
+                w,
+                h,
+                scale,
+            } => {
+                // V2 reports device pixels; `scale` is device-per-logical.
+                // winit's `set_ime_cursor_area` takes `LogicalPosition`, so
+                // we convert here. `scale <= 0` is a malformed body — fall
+                // back to 1.0 so we at least pass a sane value through.
+                let s = if *scale > 0.0 { *scale } else { 1.0 };
+                let to_logical = |v: i32| -> i32 { (v as f64 / s).round() as i32 };
+                events.push(FcitxEvent::CursorRect {
+                    conn,
+                    ic_path: ic_path.clone(),
+                    rect: [to_logical(*x), to_logical(*y), to_logical(*w), to_logical(*h)],
+                });
+            }
             FcitxMethod::SetCursorLocation { ic_path, x, y } => {
                 events.push(FcitxEvent::CursorRect {
                     conn,
@@ -461,18 +485,13 @@ impl DbusBroker {
         };
         let serial = next_nonzero(&mut c.serial_counter);
         let sender = c.fcitx_server_name.as_deref().unwrap_or(SIGNAL_SENDER);
-        let bytes = Signal {
-            our_serial: serial,
-            path: ic_path,
-            interface: INPUT_CONTEXT_IFACE,
-            member: "CommitString",
-            destination: None,
-            sender: Some(sender),
-            body: body_string(text),
-        }
-        .encode();
+        let frame = Frame::signal(ic_path, INPUT_CONTEXT_IFACE, "CommitString")
+            .serial(serial)
+            .sender(sender)
+            .body(&text.to_string())
+            .build();
         tracing::trace!(?conn, ic_path, text, sender, "emit CommitString signal");
-        c.client_out.extend(bytes);
+        c.client_out.extend(frame.encode());
         Self::try_flush(&mut c.client, &mut c.client_out)
     }
 
@@ -492,18 +511,26 @@ impl DbusBroker {
         };
         let serial = next_nonzero(&mut c.serial_counter);
         let sender = c.fcitx_server_name.as_deref().unwrap_or(SIGNAL_SENDER);
-        let bytes = Signal {
-            our_serial: serial,
-            path: ic_path,
-            interface: INPUT_CONTEXT_IFACE,
-            member: "UpdateFormattedPreedit",
-            destination: None,
-            sender: Some(sender),
-            body: body_preedit(text, cursor.unwrap_or(-1)),
-        }
-        .encode();
-        tracing::trace!(?conn, ic_path, text, sender, "emit UpdateFormattedPreedit signal");
-        c.client_out.extend(bytes);
+        // Body signature `a(si)i` — two top-level args: array of
+        // (chunk, format_flag) pairs, then cursor offset. Phase-1 emits
+        // a single chunk with flag 0.
+        let chunks: Vec<(String, i32)> = vec![(text.to_string(), 0)];
+        let frame = Frame::signal(ic_path, INPUT_CONTEXT_IFACE, "UpdateFormattedPreedit")
+            .serial(serial)
+            .sender(sender)
+            .body_args()
+            .arg(&chunks)
+            .arg(&cursor.unwrap_or(-1))
+            .done()
+            .build();
+        tracing::trace!(
+            ?conn,
+            ic_path,
+            text,
+            sender,
+            "emit UpdateFormattedPreedit signal"
+        );
+        c.client_out.extend(frame.encode());
         Self::try_flush(&mut c.client, &mut c.client_out)
     }
 
@@ -541,7 +568,7 @@ impl DbusBroker {
         }
         conn.upstream_buf.extend_from_slice(&buf[..n]);
         loop {
-            let total = match bytes_needed(&conn.upstream_buf) {
+            let total = match Frame::bytes_needed(&conn.upstream_buf) {
                 Ok(None) => break,
                 Ok(Some(n)) => n,
                 Err(e) => {
@@ -553,32 +580,27 @@ impl DbusBroker {
             if conn.upstream_buf.len() < total {
                 break;
             }
-            let frame = conn
-                .upstream_buf
-                .drain(..total)
-                .collect::<Vec<u8>>();
-            let header = match parse_header(&frame) {
-                Ok(h) => h,
+            let bytes = conn.upstream_buf.drain(..total).collect::<Vec<u8>>();
+            let frame = match Frame::parse(&bytes) {
+                Ok(f) => f,
                 Err(e) => {
-                    tracing::warn!(?id, error = %e, "upstream parser: bad header");
+                    tracing::warn!(?id, error = %e, "upstream parser: bad frame");
                     continue;
                 }
             };
-            let body_start = total - header.body_len as usize;
-            let body = &frame[body_start..];
-            match header.msg_type {
-                // Reply to an outgoing GetNameOwner we tracked:
-                // parse the single-string body to learn the unique
-                // name owner. Authoritative source — overwrites any
-                // earlier guess from the destination-capture path.
-                MessageType::MethodReturn => {
-                    let Some(reply_serial) = header.reply_serial else {
+            match frame.kind {
+                // Reply to an outgoing GetNameOwner we tracked: parse
+                // the single-string body to learn the unique-name
+                // owner. Authoritative source — overwrites any earlier
+                // guess from the destination-capture path.
+                Kind::MethodReturn => {
+                    let Some(reply_serial) = frame.fields.reply_serial else {
                         continue;
                     };
                     let Some(looked_up) = conn.pending_name_lookups.remove(&reply_serial) else {
                         continue;
                     };
-                    let Some(owner) = parse_arg0_string(body, header.endian) else {
+                    let Some(owner) = frame.decode_body::<String>() else {
                         tracing::warn!(
                             ?id,
                             reply_serial,
@@ -598,11 +620,11 @@ impl DbusBroker {
                 // `org.freedesktop.DBus.NameOwnerChanged(sss)` signal
                 // — fired by the daemon when a well-known name's
                 // unique owner changes (e.g. real fcitx5 restarted).
-                // We refresh / invalidate our cache so signals
-                // emitted after the change carry the correct sender.
-                MessageType::Signal if is_name_owner_changed_signal(&header) => {
+                // We refresh / invalidate our cache so signals emitted
+                // after the change carry the correct sender.
+                Kind::Signal if is_name_owner_changed_signal(&frame) => {
                     let Some((name, _old, new)) =
-                        parse_three_strings(body, header.endian)
+                        frame.decode_body::<(String, String, String)>()
                     else {
                         continue;
                     };
@@ -687,77 +709,22 @@ impl Drop for DbusBroker {
     }
 }
 
-/// Parse the `arg0` of a DBus message body whose signature is `s`.
-/// Returns `None` on short / malformed bodies — caller should log +
-/// skip. Separate helper rather than part of
-/// `emskin_dbus::fcitx::classify` because the latter is tied to the
-/// fcitx5 interfaces; this one is generic.
-fn parse_arg0_string(body: &[u8], endian: Endian) -> Option<String> {
-    if body.len() < 4 {
-        return None;
-    }
-    let arr: [u8; 4] = body[0..4].try_into().ok()?;
-    let len = match endian {
-        Endian::Little => u32::from_le_bytes(arr),
-        Endian::Big => u32::from_be_bytes(arr),
-    } as usize;
-    if body.len() < 4 + len + 1 {
-        return None;
-    }
-    std::str::from_utf8(&body[4..4 + len]).ok().map(String::from)
-}
-
 /// Recognize `org.freedesktop.DBus.GetNameOwner(s)` method_calls so
 /// the broker can track the request and match the eventual reply's
 /// unique-name body back to the looked-up well-known.
-fn is_get_name_owner_method(header: &emskin_dbus::dbus::message::Header) -> bool {
-    header.interface.as_deref() == Some("org.freedesktop.DBus")
-        && header.member.as_deref() == Some("GetNameOwner")
-        && header.signature.as_deref() == Some("s")
+fn is_get_name_owner_method(frame: &Frame<'_>) -> bool {
+    frame.fields.interface.as_deref() == Some("org.freedesktop.DBus")
+        && frame.fields.member.as_deref() == Some("GetNameOwner")
+        && frame.fields.signature.as_deref() == Some("s")
 }
 
 /// Recognize `org.freedesktop.DBus.NameOwnerChanged(sss)` signals
 /// from the daemon so the broker can refresh the cached fcitx5
 /// unique name after a service restart.
-fn is_name_owner_changed_signal(header: &emskin_dbus::dbus::message::Header) -> bool {
-    header.interface.as_deref() == Some("org.freedesktop.DBus")
-        && header.member.as_deref() == Some("NameOwnerChanged")
-        && header.signature.as_deref() == Some("sss")
-}
-
-/// Parse three consecutive DBus `s` args at body offset 0. Each
-/// string begins on a 4-byte alignment boundary (u32 length prefix),
-/// so successive strings are aligned relative to the body start.
-fn parse_three_strings(body: &[u8], endian: Endian) -> Option<(String, String, String)> {
-    let mut off = 0usize;
-    let s1 = read_string_advance(body, &mut off, endian)?;
-    let s2 = read_string_advance(body, &mut off, endian)?;
-    let s3 = read_string_advance(body, &mut off, endian)?;
-    Some((s1, s2, s3))
-}
-
-/// Read a DBus `s` at `*off`, advancing past the NUL terminator and
-/// aligning up to the next 4-byte boundary for the next arg.
-fn read_string_advance(body: &[u8], off: &mut usize, endian: Endian) -> Option<String> {
-    // Align `*off` up to 4.
-    *off = (*off + 3) & !3;
-    if body.len() < *off + 4 {
-        return None;
-    }
-    let arr: [u8; 4] = body[*off..*off + 4].try_into().ok()?;
-    let len = match endian {
-        Endian::Little => u32::from_le_bytes(arr),
-        Endian::Big => u32::from_be_bytes(arr),
-    } as usize;
-    *off += 4;
-    if body.len() < *off + len + 1 {
-        return None;
-    }
-    let s = std::str::from_utf8(&body[*off..*off + len])
-        .ok()?
-        .to_string();
-    *off += len + 1; // skip NUL
-    Some(s)
+fn is_name_owner_changed_signal(frame: &Frame<'_>) -> bool {
+    frame.fields.interface.as_deref() == Some("org.freedesktop.DBus")
+        && frame.fields.member.as_deref() == Some("NameOwnerChanged")
+        && frame.fields.signature.as_deref() == Some("sss")
 }
 
 /// Parse `unix:path=/run/user/1000/bus[,guid=…]` into the filesystem
@@ -871,9 +838,9 @@ mod tests {
         // Client should receive our synthesized method_return.
         let client_got = drain(&mut client);
         assert!(!client_got.is_empty(), "client should have a reply");
-        let reply_hdr = emskin_dbus::dbus::message::parse_header(&client_got).unwrap();
-        assert_eq!(reply_hdr.reply_serial, Some(7));
-        assert_eq!(reply_hdr.body_len, 0); // empty body
+        let reply = emskin_dbus::dbus::frame::Frame::parse(&client_got).unwrap();
+        assert_eq!(reply.fields.reply_serial, Some(7));
+        assert_eq!(reply.body.len(), 0); // empty body
 
         // And a CursorRect event should be on the queue.
         let events = broker.drain_events();
@@ -1015,11 +982,7 @@ mod tests {
 
         // Seed the cache by hand — same as if we'd seen the initial
         // GetNameOwner reply.
-        broker
-            .connections
-            .get_mut(&id)
-            .unwrap()
-            .fcitx_server_name = Some(":1.42".into());
+        broker.connections.get_mut(&id).unwrap().fcitx_server_name = Some(":1.42".into());
 
         // Daemon broadcasts NameOwnerChanged after fcitx5 restart.
         let sig = build_name_owner_changed("org.fcitx.Fcitx5", ":1.42", ":1.73");
@@ -1055,11 +1018,7 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         }
 
-        broker
-            .connections
-            .get_mut(&id)
-            .unwrap()
-            .fcitx_server_name = Some(":1.42".into());
+        broker.connections.get_mut(&id).unwrap().fcitx_server_name = Some(":1.42".into());
 
         let sig = build_name_owner_changed("org.fcitx.Fcitx5", ":1.42", "");
         upstream_peer.write_all(&sig).unwrap();
@@ -1135,9 +1094,9 @@ mod tests {
         // Client: method_return with `oay` signature (two top-level
         // args — object path + byte array — not a struct).
         let client_got = drain(&mut client);
-        let hdr = emskin_dbus::dbus::message::parse_header(&client_got).unwrap();
-        assert_eq!(hdr.reply_serial, Some(42));
-        assert_eq!(hdr.signature.as_deref(), Some("oay"));
+        let reply = emskin_dbus::dbus::frame::Frame::parse(&client_got).unwrap();
+        assert_eq!(reply.fields.reply_serial, Some(42));
+        assert_eq!(reply.fields.signature.as_deref(), Some("oay"));
 
         broker.remove_connection(id);
     }
@@ -1291,8 +1250,14 @@ mod tests {
         push_string_field(&mut fields, 6, "s", "org.fcitx.Fcitx5");
         push_signature_field(&mut fields, 8, "a(ss)");
 
-        // Body: u32 array length = 0.
-        let body = 0u32.to_le_bytes();
+        // Body: empty `a(ss)` array. DBus §4.1 requires padding to the
+        // first element's alignment even when the array is empty — for
+        // `(ss)` that's 8-byte alignment, so an empty body is `len=0` +
+        // 4 zero pad bytes. GDBus / fcitx5 always emit this; only ad-hoc
+        // hand-rolled bodies omit it (zvariant rejects those).
+        let mut body = Vec::new();
+        body.extend_from_slice(&0u32.to_le_bytes());
+        body.extend_from_slice(&[0u8; 4]);
 
         let mut msg = Vec::new();
         msg.extend_from_slice(&[b'l', 1, 0, 1]);

@@ -214,7 +214,10 @@ impl ImeBridge {
                 tracing::info!(
                     reason = if activating { "activating" } else { "changed" },
                     "winit.set_ime_cursor_area({}, {}, {}, {})",
-                    pos[0], pos[1], size[0], size[1]
+                    pos[0],
+                    pos[1],
+                    size[0],
+                    size[1]
                 );
                 self.last_applied_cursor_area = Some((pos, size));
             }
@@ -275,7 +278,11 @@ impl ImeBridge {
                     .as_ref()
                     .is_some_and(|a| a.conn == conn && a.ic_path == ic_path)
                 {
-                    tracing::debug!(?conn, ?ic_path, "fcitx IC FocusOut → deactivating winit IME");
+                    tracing::debug!(
+                        ?conn,
+                        ?ic_path,
+                        "fcitx IC FocusOut → deactivating winit IME"
+                    );
                     self.active_fcitx_ic = None;
                 }
             }
