@@ -203,14 +203,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Spawn the parked child (Emacs by default) regardless of whether
-    // XWayland came up. Without satellite, `display = None` and the
-    // child gets no `DISPLAY` — pgtk Emacs and Wayland-native programs
-    // are unaffected; X11-only programs fail loudly. Previously this
-    // spawn lived inside `start_xwayland_satellite`'s success path,
-    // which silently dropped the parked command on systems missing
-    // `xwayland-satellite` and left the splash spinning forever.
+    // XWayland came up. Three buckets:
+    //
+    //   - satellite up → child sees `DISPLAY=:N` (emskin's nested X)
+    //   - satellite missing, host has Xwayland → child inherits the
+    //     host `DISPLAY` and X11-only programs (gtk3 Emacs on UOS
+    //     etc.) fall back to the host X server. Windows render
+    //     outside emskin, but at least the child has a GUI instead
+    //     of dropping to TUI.
+    //   - satellite missing AND host has no DISPLAY → child runs
+    //     headless / TUI; nothing we can do without an X server.
+    //
+    // Previously this spawn lived inside `start_xwayland_satellite`'s
+    // success path, which silently dropped the parked command on
+    // systems missing `xwayland-satellite` and left the splash
+    // spinning forever.
     if let Some(pc) = state.xwayland.take_pending_command() {
         let display = state.xwayland.display();
+        if display.is_none() {
+            if let Ok(host) = std::env::var("DISPLAY") {
+                tracing::warn!(
+                    "xwayland-satellite unavailable; child will inherit host \
+                     DISPLAY={host}. X11 windows will render on the host X \
+                     server (outside emskin)."
+                );
+            } else {
+                tracing::warn!(
+                    "xwayland-satellite unavailable and host has no DISPLAY; \
+                     X11-only children will fall back to TUI / headless."
+                );
+            }
+        }
         spawn_child(&pc.command, &pc.args, display, pc.standalone, &mut state);
     }
 
@@ -488,7 +511,7 @@ fn spawn_child(
 
     let display_log = match x_display {
         Some(d) => format!(":{d}"),
-        None => "<none>".to_string(),
+        None => std::env::var("DISPLAY").unwrap_or_else(|_| "<unset>".to_string()),
     };
     tracing::info!(
         "Spawning: {command} {full_args:?} (WAYLAND_DISPLAY={socket_name} DISPLAY={display_log})"
@@ -499,18 +522,17 @@ fn spawn_child(
         // Ensure child apps prefer Wayland even when host is X11.
         .env("XDG_SESSION_TYPE", "wayland")
         .env("XDG_SESSION_DESKTOP", "emskin");
-    match x_display {
-        // Satellite came up — point children at our X socket.
-        Some(d) => {
-            cmd.env("DISPLAY", format!(":{d}"));
-        }
-        // No satellite — strip any inherited DISPLAY so X11-only
-        // children fail fast instead of silently rendering on the
-        // host X server.
-        None => {
-            cmd.env_remove("DISPLAY");
-        }
+    if let Some(d) = x_display {
+        // Satellite came up — point children at our nested X socket.
+        cmd.env("DISPLAY", format!(":{d}"));
     }
+    // No satellite — leave DISPLAY inherited from emskin's parent.
+    // X11 children then fall back to the host X server (if any),
+    // which means windows render outside the nested compositor but
+    // X11 utilities (xdg-open, screenshots, clipboard helpers)
+    // still work. Failing fast by stripping DISPLAY proved too
+    // aggressive: pgtk Emacs doesn't care, but X11-leaning tools
+    // launched as helpers from inside Emacs would all break.
     // Redirect the session bus through emskin-dbus-proxy (if running) so
     // embedded apps' IME cursor-position calls are translated into
     // emskin-local coordinates before they reach fcitx5 on the host.

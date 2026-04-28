@@ -47,10 +47,10 @@ impl XwaylandState {
     }
 
     /// Read the cached display number, if XWayland came up. Returned
-    /// to `main`'s spawn path so the child gets `DISPLAY=:N` only when
-    /// satellite actually exists; without it, child inherits no
-    /// `DISPLAY` and X11-only programs (gtk3 Emacs) fail loudly
-    /// instead of silently trying to draw on the host X server.
+    /// to `main`'s spawn path so the child gets `DISPLAY=:N` only
+    /// when satellite actually exists; without it, the child
+    /// inherits the parent's `DISPLAY` and X11 tools fall back to
+    /// the host X server.
     pub fn display(&self) -> Option<u32> {
         self.display
     }
