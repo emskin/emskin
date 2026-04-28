@@ -232,6 +232,10 @@ emskin [OPTIONS]
   --xkb-variant <VAR>     Layout variant (e.g. "nodeadkeys")
   --xkb-options <OPTS>    XKB options (e.g. "ctrl:nocaps")
   --log-file <PATH>       Write tracing logs to this file instead of stderr
+  --dbus-isolated         Spawn a private dbus-daemon for embedded apps so portal
+                          activations and GApplication single-instance stay inside
+                          emskin (experimental; host notifications/tray/secrets
+                          unreachable in this mode)
 ```
 
 ## FAQ

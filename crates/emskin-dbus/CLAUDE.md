@@ -72,6 +72,14 @@ embedded app (WeChat / Emacs pgtk / Electron / Feishu)
        │ non-fcitx5 methods pass through, fds round-trip
        ▼
   upstream host session bus (real fcitx5 stays untouched)
+                  ↑
+       OR a private `dbus-daemon` child when emskin is run with
+       `--dbus-isolated` — the upstream socket is whatever path the
+       consumer hands to `DbusBroker::bind`. From this crate's
+       perspective there's no difference: it's still a Unix socket
+       speaking DBus. The fcitx5 path keeps working because emskin's
+       host fcitx5 reaches the winit window over Wayland (text_input_v3),
+       not over this DBus bridge.
 ```
 
 The consumer crate (e.g. `emskin`) wires the broker's listener fd and
