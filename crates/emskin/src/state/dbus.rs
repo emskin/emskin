@@ -127,9 +127,7 @@ impl DbusBridge {
         let daemon_socket = session_dir.join("upstream-bus.sock");
         let services_dir = session_dir.join("services");
         let config_path = session_dir.join("session.conf");
-        if let Err(e) =
-            write_minimal_session_config(&config_path, &services_dir, &daemon_socket)
-        {
+        if let Err(e) = write_minimal_session_config(&config_path, &services_dir, &daemon_socket) {
             tracing::warn!(error = %e, "failed to write session.conf; bridge inert");
             let _ = std::fs::remove_dir_all(&session_dir);
             return Self::default();
@@ -273,7 +271,6 @@ fn wait_for_daemon_socket(socket: &Path, daemon: &mut Child) -> std::io::Result<
         std::thread::sleep(POLL_INTERVAL);
     }
 }
-
 
 /// Write a minimal session.conf for the isolated daemon. Critical
 /// design point: we **do not** include `<standard_session_servicedirs/>`

@@ -240,6 +240,31 @@ emskin [OPTIONS]
 
 ## FAQ
 
+### `--dbus-isolated` notes for GNOME / KDE
+
+`--dbus-isolated` spawns a private `dbus-daemon` so embedded apps stop
+leaking out to the host compositor on portal / GApplication
+activation. The mechanics are identical on GNOME and KDE (both speak
+the same session bus), but the **trade-offs land differently**:
+
+- **GNOME** — heaviest payoff: portal-mediated launches (`xdg-open`,
+  GTK file dialogs) and GApplication single-instance apps now stay in
+  emskin instead of attaching to the host shell. Loss: notifications
+  fired from emskin children don't reach the GNOME notification panel,
+  saved passwords in `gnome-keyring` are unreachable, and tray icons
+  via `org.kde.StatusNotifierWatcher` won't appear in any extension
+  that proxies host tray.
+- **KDE Plasma** — same payoff for portal/GApplication. KDE users feel
+  the tray loss more (more apps surface via `KStatusNotifierItem`),
+  and `kwallet` becomes unreachable instead of `gnome-keyring`. KDE's
+  own portal backend (`xdg-desktop-portal-kde`) activates locally
+  inside emskin, so file dialogs match Plasma styling without leaking
+  to host.
+
+If you find a host service whose loss is unacceptable in your
+workflow, the next step is per-name bridging or a local
+activation-`.service` shim — file an issue.
+
 ### Crash on startup in a VM
 
 emskin supports software rendering (llvmpipe), but older Mesa (< 21.0) may crash at high resolutions:
