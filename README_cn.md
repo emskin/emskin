@@ -224,9 +224,32 @@ emskin [OPTIONS]
   --xkb-variant <VAR>     布局变体 (例: "nodeadkeys")
   --xkb-options <OPTS>    XKB 选项 (例: "ctrl:nocaps")
   --log-file <PATH>       将 tracing 日志写入文件而非 stderr
+  --dbus-isolated         为嵌入应用启动私有 dbus-daemon，让 portal 激活与
+                          GApplication 单实例都留在 emskin 内（实验性；该模式
+                          下宿主通知 / 托盘 / 密钥环不可达）
 ```
 
 ## FAQ
+
+### `--dbus-isolated` 在 GNOME / KDE 下的注意事项
+
+`--dbus-isolated` 启动一个私有 `dbus-daemon`，让嵌入应用在 portal /
+GApplication 激活时不再"漏"到宿主合成器。机制在 GNOME 和 KDE 上完全
+相同（同一套 session bus、同一组协议），但**用户体感取舍不一样**：
+
+- **GNOME** —— 收益最明显：portal 触发的启动（`xdg-open`、GTK 文件对
+  话框）和 GApplication 单实例应用都留在 emskin 里，不再被宿主的
+  shell 接走。代价：emskin 里应用发出的通知到不了 GNOME 通知面板，
+  `gnome-keyring` 里保存的密码读不到，依赖
+  `org.kde.StatusNotifierWatcher` 代理的托盘图标也不会出现。
+- **KDE Plasma** —— portal/GApplication 收益相同。KDE 用户更容易感
+  受到托盘缺失（更多应用通过 `KStatusNotifierItem` 暴露），密钥环失
+  去的是 `kwallet` 而不是 `gnome-keyring`。KDE 自家的
+  `xdg-desktop-portal-kde` 后端会在 emskin 内部本地激活，文件对话框
+  仍是 Plasma 风格、不漏到宿主。
+
+如果遇到某个宿主服务不能没有，下一步可以做按 well-known name 桥接，
+或者写一个本地 activation `.service` shim ——欢迎开 issue。
 
 ### 虚拟机里启动后闪退
 
