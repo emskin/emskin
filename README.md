@@ -240,9 +240,38 @@ emskin [OPTIONS]
   --xkb-variant <VAR>     Layout variant (e.g. "nodeadkeys")
   --xkb-options <OPTS>    XKB options (e.g. "ctrl:nocaps")
   --log-file <PATH>       Write tracing logs to this file instead of stderr
+  --dbus-isolated         Spawn a private dbus-daemon for embedded apps so portal
+                          activations and GApplication single-instance stay inside
+                          emskin (experimental; host notifications/tray/secrets
+                          unreachable in this mode)
 ```
 
 ## FAQ
+
+### `--dbus-isolated` notes for GNOME / KDE
+
+`--dbus-isolated` spawns a private `dbus-daemon` so embedded apps stop
+leaking out to the host compositor on portal / GApplication
+activation. The mechanics are identical on GNOME and KDE (both speak
+the same session bus), but the **trade-offs land differently**:
+
+- **GNOME** — heaviest payoff: portal-mediated launches (`xdg-open`,
+  GTK file dialogs) and GApplication single-instance apps now stay in
+  emskin instead of attaching to the host shell. Loss: notifications
+  fired from emskin children don't reach the GNOME notification panel,
+  saved passwords in `gnome-keyring` are unreachable, and tray icons
+  via `org.kde.StatusNotifierWatcher` won't appear in any extension
+  that proxies host tray.
+- **KDE Plasma** — same payoff for portal/GApplication. KDE users feel
+  the tray loss more (more apps surface via `KStatusNotifierItem`),
+  and `kwallet` becomes unreachable instead of `gnome-keyring`. KDE's
+  own portal backend (`xdg-desktop-portal-kde`) activates locally
+  inside emskin, so file dialogs match Plasma styling without leaking
+  to host.
+
+If you find a host service whose loss is unacceptable in your
+workflow, the next step is per-name bridging or a local
+activation-`.service` shim — file an issue.
 
 ### Crash on startup in a VM
 
