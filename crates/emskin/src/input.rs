@@ -48,7 +48,8 @@ impl EmskinState {
                             }
                         }
 
-                        (modifiers.ctrl && matches!(key, keysyms::KEY_x | keysyms::KEY_c))
+                        (modifiers.ctrl
+                            && matches!(key, keysyms::KEY_x | keysyms::KEY_c | keysyms::KEY_j))
                             || (modifiers.alt && key == keysyms::KEY_x)
                     },
                 );
