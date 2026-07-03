@@ -2,3 +2,4 @@
 !.claude/skills/
 target
 Cargo.lock
+*.patch
