@@ -31,6 +31,7 @@ pub struct CursorState {
     /// Last raw absolute pointer location from the host, in compositor
     /// coords. `None` on first event.
     last_raw_loc: Option<Point<f64, Logical>>,
+    pub host_cursor_locked: bool,
 }
 
 impl Default for CursorState {
@@ -39,6 +40,7 @@ impl Default for CursorState {
             status: CursorImageStatus::default_named(),
             changed: false,
             last_raw_loc: None,
+            host_cursor_locked: false,
         }
     }
 }
@@ -103,6 +105,10 @@ impl CursorState {
             Some(prev) => new_abs - prev,
             None => Point::default(),
         }
+    }
+
+    pub fn force_raw_location(&mut self, pos: Point<f64, Logical>) {
+        self.last_raw_loc = Some(pos);
     }
 }
 

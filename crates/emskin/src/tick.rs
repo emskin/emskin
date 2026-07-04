@@ -2,7 +2,11 @@
 
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::IsAlive;
-use smithay::wayland::seat::WaylandFocus;
+use smithay::wayland::{
+    pointer_constraints::{with_pointer_constraint, PointerConstraint},
+    seat::WaylandFocus,
+};
+use winit_crate::window::CursorGrabMode;
 
 use crate::ipc::OutgoingMessage;
 use crate::state::EmskinState;
@@ -52,6 +56,25 @@ pub fn event_loop_tick(state: &mut EmskinState) {
     cleanup_dead_apps(state);
     // --- Clean up destroyed floating dialogs ---
     cleanup_dead_dialogs(state);
+
+    if state.cursor.host_cursor_locked {
+        let mut still_locked = false;
+        if let Some(pointer) = state.seat.get_pointer() {
+            if let Some(focused) = pointer.current_focus() {
+                still_locked = with_pointer_constraint(&focused, &pointer, |c| {
+                    c.is_some_and(|c| {
+                        matches!(&*c, PointerConstraint::Locked(_)) && c.is_active()
+                    })
+                });
+            }
+        }
+        if !still_locked {
+            if let Some(backend) = state.backend.as_ref() {
+                let _ = backend.window().set_cursor_grab(CursorGrabMode::None);
+            }
+            state.cursor.host_cursor_locked = false;
+        }
+    }
 
     // --- Dispatch incoming IPC messages from Emacs ---
     if let Some(msgs) = state.ipc.recv_all() {
