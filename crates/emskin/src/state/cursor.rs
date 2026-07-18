@@ -19,6 +19,7 @@
 //!    correct under a pointer lock, while `pointer.current_location()`
 //!    would freeze.
 
+use smithay::input::keyboard::ModifiersState;
 use smithay::input::pointer::CursorImageStatus;
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Logical, Point};
@@ -32,6 +33,10 @@ pub struct CursorState {
     /// coords. `None` on first event.
     last_raw_loc: Option<Point<f64, Logical>>,
     pub host_cursor_locked: bool,
+    pub last_modifiers: ModifiersState,
+    /// Consecutive ticks with the same non-empty pressed-keys set and
+    /// active modifiers — used to detect stuck modifier keys.
+    pub pressed_same_ticks: u32,
 }
 
 impl Default for CursorState {
@@ -41,6 +46,8 @@ impl Default for CursorState {
             changed: false,
             last_raw_loc: None,
             host_cursor_locked: false,
+            last_modifiers: ModifiersState::default(),
+            pressed_same_ticks: 0,
         }
     }
 }

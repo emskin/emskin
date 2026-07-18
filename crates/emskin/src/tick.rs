@@ -1,7 +1,9 @@
 //! Event loop tick — the per-frame idle callback for the compositor.
 
+use smithay::backend::input::KeyState;
+use smithay::input::keyboard::{FilterResult, ModifiersState};
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::IsAlive;
+use smithay::utils::{IsAlive, SERIAL_COUNTER};
 use smithay::wayland::{
     pointer_constraints::{with_pointer_constraint, PointerConstraint},
     seat::WaylandFocus,
@@ -62,9 +64,7 @@ pub fn event_loop_tick(state: &mut EmskinState) {
         if let Some(pointer) = state.seat.get_pointer() {
             if let Some(focused) = pointer.current_focus() {
                 still_locked = with_pointer_constraint(&focused, &pointer, |c| {
-                    c.is_some_and(|c| {
-                        matches!(&*c, PointerConstraint::Locked(_)) && c.is_active()
-                    })
+                    c.is_some_and(|c| matches!(&*c, PointerConstraint::Locked(_)) && c.is_active())
                 });
             }
         }
@@ -502,13 +502,11 @@ fn process_workspace_actions(state: &mut EmskinState) {
             WorkspaceAction::Activate(id) => {
                 state.switch_workspace(id);
             }
-            WorkspaceAction::Remove(id) => {
-                if id != state.workspace.active_id {
-                    state.destroy_workspace(id);
-                    state
-                        .ipc
-                        .send(OutgoingMessage::WorkspaceDestroyed { workspace_id: id });
-                }
+            WorkspaceAction::Remove(id) if id != state.workspace.active_id => {
+                state.destroy_workspace(id);
+                state
+                    .ipc
+                    .send(OutgoingMessage::WorkspaceDestroyed { workspace_id: id });
             }
             _ => {} // Deactivate / CreateWorkspace: future extension
         }
@@ -676,5 +674,44 @@ fn cleanup_dead_dialogs(state: &mut EmskinState) {
             keyboard.set_focus(state, target, serial);
             tracing::debug!("focus returned to Emacs after dialog destroy");
         }
+    }
+
+    // Release stuck modifier keys (e.g. Ctrl held but release
+    // event lost during focus disruption).
+    let mods = state.cursor.last_modifiers;
+    if (mods.ctrl || mods.alt || mods.logo || mods.shift) && !state.cursor.host_cursor_locked {
+        if let Some(keyboard) = state.seat.get_keyboard() {
+            let pressed = keyboard.pressed_keys();
+            if pressed.is_empty() {
+                state.cursor.pressed_same_ticks = 0;
+            } else {
+                let count = pressed.len();
+                let prev = state.cursor.pressed_same_ticks & 0xFFFF;
+                let prev_count = (state.cursor.pressed_same_ticks >> 16) as usize;
+                if prev_count == count {
+                    state.cursor.pressed_same_ticks = ((count as u32) << 16) | (prev + 1);
+                } else {
+                    state.cursor.pressed_same_ticks = ((count as u32) << 16) | 1;
+                }
+                if state.cursor.pressed_same_ticks & 0xFFFF > 60 {
+                    let time = state.start_time.elapsed().as_millis() as u32;
+                    for keycode in pressed {
+                        let serial = SERIAL_COUNTER.next_serial();
+                        keyboard.input::<(), _>(
+                            state,
+                            keycode,
+                            KeyState::Released,
+                            serial,
+                            time,
+                            |_, _, _| FilterResult::Forward,
+                        );
+                    }
+                    state.cursor.pressed_same_ticks = 0;
+                    state.cursor.last_modifiers = ModifiersState::default();
+                }
+            }
+        }
+    } else {
+        state.cursor.pressed_same_ticks = 0;
     }
 }

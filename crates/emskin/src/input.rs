@@ -49,6 +49,8 @@ impl EmskinState {
                             }
                         }
 
+                        state.cursor.last_modifiers = *modifiers;
+
                         (modifiers.ctrl && matches!(key, keysyms::KEY_x | keysyms::KEY_c))
                             || (modifiers.alt && key == keysyms::KEY_x)
                     },
@@ -189,11 +191,8 @@ impl EmskinState {
                         if window.set_cursor_position(center).is_ok() {
                             let cx = (size.width / 2) as f64 / output_scale;
                             let cy = (size.height / 2) as f64 / output_scale;
-                            let center_logical: Point<f64, Logical> = (
-                                output_geo.loc.x as f64 + cx,
-                                output_geo.loc.y as f64 + cy,
-                            )
-                                .into();
+                            let center_logical: Point<f64, Logical> =
+                                (output_geo.loc.x as f64 + cx, output_geo.loc.y as f64 + cy).into();
                             self.cursor.force_raw_location(center_logical);
                         }
                     }
