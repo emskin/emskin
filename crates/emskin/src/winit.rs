@@ -556,26 +556,6 @@ pub fn init_winit(
                 }
                 state.needs_redraw = true;
             }
-            WinitEvent::DeviceEvent(winit_crate::event::DeviceEvent::MouseMotion {
-                delta: (dx, dy),
-            }) if state.cursor.host_cursor_locked => {
-                if let Some(pointer) = state.seat.get_pointer() {
-                    let focus = pointer
-                        .current_focus()
-                        .map(|surface| (surface, pointer.current_location()));
-                    pointer.relative_motion(
-                        state,
-                        focus,
-                            &smithay::input::pointer::RelativeMotionEvent {
-                                delta: (dx, dy).into(),
-                                delta_unaccel: (dx, dy).into(),
-                                utime: state.start_time.elapsed().as_micros() as u64,
-                            },
-                        );
-                    pointer.frame(state);
-                    state.needs_redraw = true;
-                }
-            }
             _ => {}
             };
 

@@ -8,7 +8,7 @@ use smithay::{
         pointer::{AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent},
     },
     reexports::wayland_server::Resource,
-    utils::{Logical, Point, SERIAL_COUNTER},
+    utils::SERIAL_COUNTER,
     wayland::{
         pointer_constraints::{with_pointer_constraint, PointerConstraint},
         seat::WaylandFocus,
@@ -101,7 +101,6 @@ impl EmskinState {
                 let Some(output_geo) = self.workspace.active_space.output_geometry(output) else {
                     return;
                 };
-                let output_scale = output.current_scale().fractional_scale();
                 let Some(pointer) = self.seat.get_pointer() else {
                     return;
                 };
@@ -177,23 +176,10 @@ impl EmskinState {
 
                 if pointer_locked {
                     pointer.frame(self);
-                    if let Some(backend) = self.backend.as_ref() {
-                        let window = backend.window();
-                        if !self.cursor.host_cursor_locked {
-                            let _ = window.set_cursor_grab(CursorGrabMode::Locked);
+                    if !self.cursor.host_cursor_locked {
+                        if let Some(backend) = self.backend.as_ref() {
+                            let _ = backend.window().set_cursor_grab(CursorGrabMode::Confined);
                             self.cursor.host_cursor_locked = true;
-                        }
-                        let size = window.inner_size();
-                        let center = winit_crate::dpi::PhysicalPosition::new(
-                            (size.width / 2) as i32,
-                            (size.height / 2) as i32,
-                        );
-                        if window.set_cursor_position(center).is_ok() {
-                            let cx = (size.width / 2) as f64 / output_scale;
-                            let cy = (size.height / 2) as f64 / output_scale;
-                            let center_logical: Point<f64, Logical> =
-                                (output_geo.loc.x as f64 + cx, output_geo.loc.y as f64 + cy).into();
-                            self.cursor.force_raw_location(center_logical);
                         }
                     }
                     return;

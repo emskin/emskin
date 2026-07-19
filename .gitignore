@@ -3,4 +3,3 @@
 target
 Cargo.lock
 *.patch
-smithay-local/

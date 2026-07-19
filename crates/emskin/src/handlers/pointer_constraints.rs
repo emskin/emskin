@@ -24,7 +24,7 @@ impl PointerConstraintsHandler for EmskinState {
                     constraint.activate();
                     if matches!(&*constraint, PointerConstraint::Locked(_)) {
                         if let Some(backend) = self.backend.as_ref() {
-                            let _ = backend.window().set_cursor_grab(CursorGrabMode::Locked);
+                            let _ = backend.window().set_cursor_grab(CursorGrabMode::Confined);
                             self.cursor.host_cursor_locked = true;
                         }
                     }
