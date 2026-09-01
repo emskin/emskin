@@ -1,5 +1,6 @@
 //! Event loop tick — the per-frame idle callback for the compositor.
 
+use smithay::desktop::{space::SpaceElement, Space, Window};
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::IsAlive;
 use smithay::wayland::seat::WaylandFocus;
@@ -122,6 +123,14 @@ pub fn event_loop_tick(state: &mut EmskinState) {
     // (Alacritty etc.) whose cursor_rectangle arrives async after
     // focus.
     state.ime.poll_tip_freshness(&state.seat, &state.apps);
+
+    // `Space::map_element` always moves an element to the top. Embedded
+    // apps legitimately use it from several geometry/lifecycle paths, but
+    // Emacs child frames (posframe, corfu, etc.) must remain above them.
+    // Re-establish the invariant once after all per-tick mutations.
+    if ensure_emacs_child_frames_on_top(&mut state.workspace.active_space) {
+        state.needs_redraw = true;
+    }
 }
 
 /// Drain broker-observed fcitx5 events and hand them to the IME
@@ -186,7 +195,14 @@ fn process_pending_toplevels(state: &mut EmskinState) {
     state.needs_redraw = true;
     for (surface, window) in pending {
         if surface.parent().is_some() {
-            // Child frame (posframe, etc.) — leave in current space, GTK manages.
+            // Child frame (posframe, etc.) — leave in the current space,
+            // but undo the temporary lower_element from new_toplevel. The
+            // parent is fullscreen Emacs, while embedded apps sit above it;
+            // leaving the child lowered makes those apps cover the child.
+            window
+                .user_data()
+                .insert_if_missing(EmacsChildFrameTag::default);
+            state.workspace.active_space.raise_element(&window, false);
             tracing::info!(
                 "Emacs child frame confirmed (has parent), workspace {}",
                 state.workspace.active_id
@@ -242,6 +258,47 @@ fn process_pending_toplevels(state: &mut EmskinState) {
             state.switch_workspace(ws_id);
         }
     }
+}
+
+/// Marker stored on confirmed Emacs child-frame windows.
+#[derive(Clone, Copy, Default)]
+struct EmacsChildFrameTag;
+
+/// Keep every confirmed Emacs child frame in a contiguous top-of-stack
+/// suffix while preserving the relative order between child frames.
+fn ensure_emacs_child_frames_on_top(space: &mut Space<Window>) -> bool {
+    ensure_matching_elements_on_top(space, |window| {
+        window.user_data().get::<EmacsChildFrameTag>().is_some()
+    })
+}
+
+fn ensure_matching_elements_on_top<E, F>(space: &mut Space<E>, is_top: F) -> bool
+where
+    E: SpaceElement + PartialEq + Clone,
+    F: Fn(&E) -> bool,
+{
+    let mut saw_top = false;
+    let mut needs_restack = false;
+    let mut top_elements = Vec::new();
+
+    // Space iterates back-to-front. Once a top-class element appears,
+    // seeing any ordinary element after it means the invariant was broken.
+    for element in space.elements() {
+        if is_top(element) {
+            saw_top = true;
+            top_elements.push(element.clone());
+        } else if saw_top {
+            needs_restack = true;
+        }
+    }
+
+    if needs_restack {
+        for element in top_elements {
+            space.raise_element(&element, false);
+        }
+    }
+
+    needs_restack
 }
 
 /// Drain `pending_app_toplevels`, classify each as either a floating
@@ -653,5 +710,99 @@ fn cleanup_dead_dialogs(state: &mut EmskinState) {
             keyboard.set_focus(state, target, serial);
             tracing::debug!("focus returned to Emacs after dialog destroy");
         }
+    }
+}
+
+#[cfg(test)]
+mod stacking_tests {
+    use super::*;
+    use smithay::output::Output;
+    use smithay::utils::{IsAlive, Logical, Point, Rectangle};
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct TestElement {
+        id: u8,
+        top: bool,
+    }
+
+    impl TestElement {
+        fn new(id: u8, top: bool) -> Self {
+            Self { id, top }
+        }
+    }
+
+    impl IsAlive for TestElement {
+        fn alive(&self) -> bool {
+            true
+        }
+    }
+
+    impl SpaceElement for TestElement {
+        fn bbox(&self) -> Rectangle<i32, Logical> {
+            Rectangle::new((0, 0).into(), (1, 1).into())
+        }
+
+        fn is_in_input_region(&self, _point: &Point<f64, Logical>) -> bool {
+            true
+        }
+
+        fn set_activate(&self, _activated: bool) {}
+
+        fn output_enter(&self, _output: &Output, _overlap: Rectangle<i32, Logical>) {}
+
+        fn output_leave(&self, _output: &Output) {}
+    }
+
+    fn ids(space: &Space<TestElement>) -> Vec<u8> {
+        space.elements().map(|element| element.id).collect()
+    }
+
+    #[test]
+    fn restores_child_frames_after_an_app_restack() {
+        let host = TestElement::new(1, false);
+        let app = TestElement::new(2, false);
+        let child_one = TestElement::new(3, true);
+        let child_two = TestElement::new(4, true);
+        let mut space = Space::default();
+
+        space.map_element(host, (0, 0), false);
+        space.map_element(app.clone(), (0, 0), false);
+        space.map_element(child_one, (0, 0), false);
+        space.map_element(child_two, (0, 0), false);
+
+        // Geometry updates use map_element, whose documented side effect is
+        // to move the app above both child frames.
+        space.map_element(app.clone(), (10, 20), false);
+        assert_eq!(ids(&space), vec![1, 3, 4, 2]);
+
+        assert!(ensure_matching_elements_on_top(&mut space, |element| {
+            element.top
+        }));
+
+        assert_eq!(ids(&space), vec![1, 2, 3, 4]);
+        assert_eq!(space.element_location(&app), Some((10, 20).into()));
+        assert!(!ensure_matching_elements_on_top(&mut space, |element| {
+            element.top
+        }));
+    }
+
+    #[test]
+    fn restores_a_temporarily_lowered_child_frame() {
+        let host = TestElement::new(1, false);
+        let app = TestElement::new(2, false);
+        let child = TestElement::new(3, true);
+        let mut space = Space::default();
+
+        space.map_element(host, (0, 0), false);
+        space.map_element(app, (0, 0), false);
+        space.map_element(child.clone(), (0, 0), false);
+        space.lower_element(&child);
+        assert_eq!(ids(&space), vec![3, 1, 2]);
+
+        assert!(ensure_matching_elements_on_top(&mut space, |element| {
+            element.top
+        }));
+
+        assert_eq!(ids(&space), vec![1, 2, 3]);
     }
 }
