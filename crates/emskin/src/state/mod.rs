@@ -265,7 +265,9 @@ impl EmskinState {
         let start_time = std::time::Instant::now();
         let dh = display.handle();
 
-        let compositor_state = CompositorState::new::<Self>(&dh);
+        // Version 6 lets us send preferred_buffer_scale to clients that do
+        // not bind wp-fractional-scale-v1.
+        let compositor_state = CompositorState::new_v6::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let popups = PopupManager::default();

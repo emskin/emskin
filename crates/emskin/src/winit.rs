@@ -432,6 +432,7 @@ pub fn init_winit(
                         Some(Scale::Fractional(scale_factor)),
                         None,
                     );
+                    state.refresh_surface_scales(&output);
                     // LayerMap caches `non_exclusive_zone` inside its `zone`
                     // field — it only refreshes when `arrange()` runs. Without
                     // this call, effects and Emacs would keep seeing the old

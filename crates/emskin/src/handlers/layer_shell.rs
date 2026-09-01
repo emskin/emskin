@@ -28,6 +28,17 @@ impl WlrLayerShellHandler for EmskinState {
             return;
         };
 
+        smithay::wayland::compositor::with_states(
+            desktop_layer.layer_surface().wl_surface(),
+            |data| {
+                super::compositor::send_scale_transform(
+                    desktop_layer.layer_surface().wl_surface(),
+                    data,
+                    &output,
+                );
+            },
+        );
+
         let mut map = layer_map_for_output(&output);
         let zone_before = map.non_exclusive_zone();
         if let Err(e) = map.map_layer(&desktop_layer) {
