@@ -27,6 +27,12 @@ impl XdgShellHandler for EmskinState {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
+        if let Some(output) = self.workspace.active_space.outputs().next() {
+            with_states(surface.wl_surface(), |data| {
+                super::compositor::send_scale_transform(surface.wl_surface(), data, output);
+            });
+        }
+
         if self.emacs.should_claim_main() {
             // First toplevel = Emacs (Wayland/pgtk path only).
             // X11 Emacs sets initial_size_settled in map_window_request.
@@ -135,6 +141,11 @@ impl XdgShellHandler for EmskinState {
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
+        if let Some(output) = self.workspace.active_space.outputs().next() {
+            with_states(surface.wl_surface(), |data| {
+                super::compositor::send_scale_transform(surface.wl_surface(), data, output);
+            });
+        }
         self.unconstrain_popup(&surface);
         if let Err(e) = self.wl.popups.track_popup(PopupKind::Xdg(surface)) {
             tracing::warn!("Failed to track popup: {}", e);

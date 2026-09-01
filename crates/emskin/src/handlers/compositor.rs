@@ -6,6 +6,7 @@ use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
     delegate_compositor, delegate_shm,
     desktop::{layer_map_for_output, utils::send_frames_surface_tree, WindowSurfaceType},
+    output::Output,
     reexports::wayland_server::{
         protocol::{wl_buffer, wl_surface::WlSurface},
         Client,
@@ -13,14 +14,59 @@ use smithay::{
     wayland::{
         buffer::BufferHandler,
         compositor::{
-            get_parent, is_sync_subsurface, CompositorClientState, CompositorHandler,
-            CompositorState,
+            get_parent, is_sync_subsurface, send_surface_state, with_states, CompositorClientState,
+            CompositorHandler, CompositorState, SurfaceData,
         },
+        fractional_scale::with_fractional_scale,
         shm::{ShmHandler, ShmState},
     },
 };
 
 use super::xdg_shell;
+
+/// Send the output's integer and fractional scale to one surface.
+///
+/// `preferred_buffer_scale` keeps wl_compositor-v6 clients working, while
+/// `wp_fractional_scale_v1.preferred_scale` lets modern clients render at the
+/// host compositor's exact fractional scale instead of rendering at the next
+/// integer scale and being downsampled.
+pub(crate) fn send_scale_transform(surface: &WlSurface, data: &SurfaceData, output: &Output) {
+    let scale = output.current_scale();
+    send_surface_state(
+        surface,
+        data,
+        scale.integer_scale(),
+        output.current_transform(),
+    );
+    with_fractional_scale(data, |fractional_scale| {
+        fractional_scale.set_preferred_scale(scale.fractional_scale());
+    });
+}
+
+impl EmskinState {
+    /// Re-send scale state to every mapped client after the host scale changes.
+    pub(crate) fn refresh_surface_scales(&self, output: &Output) {
+        for window in self.workspace.active_space.elements() {
+            window.with_surfaces(|surface, data| {
+                send_scale_transform(surface, data, output);
+            });
+        }
+        for workspace in self.workspace.inactive.values() {
+            for window in workspace.space.elements() {
+                window.with_surfaces(|surface, data| {
+                    send_scale_transform(surface, data, output);
+                });
+            }
+        }
+
+        let map = layer_map_for_output(output);
+        for layer in map.layers() {
+            layer.with_surfaces(|surface, data| {
+                send_scale_transform(surface, data, output);
+            });
+        }
+    }
+}
 
 impl CompositorHandler for EmskinState {
     fn compositor_state(&mut self) -> &mut CompositorState {
@@ -32,6 +78,14 @@ impl CompositorHandler for EmskinState {
             .get_data::<ClientState>()
             .expect("ClientState missing — client was not inserted via our listener")
             .compositor_state
+    }
+
+    fn new_subsurface(&mut self, surface: &WlSurface, _parent: &WlSurface) {
+        if let Some(output) = self.workspace.active_space.outputs().next() {
+            with_states(surface, |data| {
+                send_scale_transform(surface, data, output);
+            });
+        }
     }
 
     fn commit(&mut self, surface: &WlSurface) {
@@ -185,10 +239,12 @@ delegate_shm!(EmskinState);
 
 smithay::delegate_viewporter!(EmskinState);
 impl smithay::wayland::fractional_scale::FractionalScaleHandler for EmskinState {
-    fn new_fractional_scale(
-        &mut self,
-        _surface: smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
-    ) {
+    fn new_fractional_scale(&mut self, surface: WlSurface) {
+        if let Some(output) = self.workspace.active_space.outputs().next() {
+            with_states(&surface, |data| {
+                send_scale_transform(&surface, data, output);
+            });
+        }
     }
 }
 smithay::delegate_fractional_scale!(EmskinState);
