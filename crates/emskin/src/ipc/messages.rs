@@ -100,6 +100,15 @@ pub enum IncomingMessage {
         #[serde(default)]
         color: Option<String>,
     },
+    /// Report the rectangles (Emacs surface-local coordinates) of every
+    /// visible child frame (corfu, posframe, …) of the active frame. pgtk
+    /// paints child frames into the parent's own `wl_surface`, so the
+    /// compositor re-draws those regions of Emacs above embedded apps and
+    /// routes pointer input there to Emacs. An empty list clears them.
+    SetChildFrames {
+        #[serde(default)]
+        rects: Vec<IpcRect>,
+    },
     /// Request a one-shot PNG screenshot of the composited output, written
     /// to the given absolute path. Replaces any previously queued request.
     TakeScreenshot {
@@ -396,6 +405,33 @@ mod tests {
             }
             _ => panic!("expected SetCursorRect"),
         }
+    }
+
+    #[test]
+    fn parses_set_child_frames() {
+        let json = r#"{"type":"set_child_frames","rects":[{"x":10,"y":20,"w":300,"h":120}]}"#;
+        let msg: IncomingMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            IncomingMessage::SetChildFrames { rects } => {
+                assert_eq!(
+                    rects,
+                    vec![IpcRect {
+                        x: 10,
+                        y: 20,
+                        w: 300,
+                        h: 120,
+                    }]
+                );
+            }
+            _ => panic!("expected SetChildFrames"),
+        }
+    }
+
+    #[test]
+    fn parses_set_child_frames_empty() {
+        let json = r#"{"type":"set_child_frames","rects":[]}"#;
+        let msg: IncomingMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, IncomingMessage::SetChildFrames { rects } if rects.is_empty()));
     }
 
     #[test]

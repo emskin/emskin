@@ -140,6 +140,7 @@ back to the generic `display-buffer' path.")
 (require 'emskin-jelly)
 (require 'emskin-key-cast)
 (require 'emskin-record)
+(require 'emskin-child-frame)
 
 ;; ---------------------------------------------------------------------------
 ;; Config sync

@@ -4,84 +4,16 @@
 use smithay::{
     backend::renderer::{
         element::{texture::TextureRenderElement, Id, Kind},
-        gles::{GlesRenderer, GlesTexture},
-        utils::{import_surface_tree, RendererSurfaceStateUserData},
+        gles::GlesRenderer,
+        utils::import_surface_tree,
         Renderer,
     },
-    utils::{Logical, Point, Rectangle, Size, Transform},
-    wayland::compositor::{with_surface_tree_downward, TraversalAction},
+    utils::{Logical, Point},
 };
 
+use crate::surface_snapshot::collect_surface_tree;
 use crate::winit::CustomElement;
 use crate::EmskinState;
-
-/// Snapshot of one mapped surface within a layer's subsurface tree, in
-/// source-logical coords. Collected once per layer so each mirror only has to
-/// scale/translate (cheap), not re-walk the tree (expensive on GTK apps with
-/// many subsurfaces).
-struct SurfaceSnapshot {
-    surface: smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
-    /// Offset from the toplevel origin (already includes layer.offset for popups).
-    offset: Point<f64, Logical>,
-    view_src: Rectangle<f64, Logical>,
-    view_dst: Size<i32, Logical>,
-    texture: GlesTexture,
-    buffer_scale: i32,
-    buffer_transform: Transform,
-}
-
-/// Walk a layer's subsurface tree and collect one snapshot per mapped surface
-/// with a texture. Offsets accumulate in source-logical space starting from
-/// `layer.render_offset`, which already matches smithay's
-/// `Space::render_location()` (canceling GTK CSD shadow padding).
-fn collect_layer_surfaces(
-    renderer: &mut GlesRenderer,
-    layer: &crate::apps::SurfaceLayer,
-) -> Vec<SurfaceSnapshot> {
-    let ctx = renderer.context_id();
-    let mut out: Vec<SurfaceSnapshot> = Vec::new();
-    let initial =
-        Point::<f64, Logical>::from((layer.render_offset.x as f64, layer.render_offset.y as f64));
-    with_surface_tree_downward(
-        &layer.surface,
-        initial,
-        |_, states, loc| {
-            let mut loc = *loc;
-            if let Some(data) = states.data_map.get::<RendererSurfaceStateUserData>() {
-                if let Some(view) = data.lock().unwrap().view() {
-                    loc.x += view.offset.x as f64;
-                    loc.y += view.offset.y as f64;
-                    return TraversalAction::DoChildren(loc);
-                }
-            }
-            TraversalAction::SkipChildren
-        },
-        |surface, states, loc| {
-            let mut loc = *loc;
-            let Some(data) = states.data_map.get::<RendererSurfaceStateUserData>() else {
-                return;
-            };
-            let data = data.lock().unwrap();
-            let Some(view) = data.view() else { return };
-            loc.x += view.offset.x as f64;
-            loc.y += view.offset.y as f64;
-            let Some(texture) = data.texture::<GlesTexture>(ctx.clone()).cloned() else {
-                return;
-            };
-            out.push(SurfaceSnapshot {
-                surface: surface.clone(),
-                offset: loc,
-                view_src: view.src,
-                view_dst: view.dst,
-                texture,
-                buffer_scale: data.buffer_scale(),
-                buffer_transform: data.buffer_transform(),
-            });
-        },
-        |_, _, _| true,
-    );
-    out
-}
 
 /// Build TextureRenderElements for all mirrors. Handles clients (e.g. GTK /
 /// Firefox) that render via `wl_subsurface` rather than attaching a buffer
@@ -114,7 +46,7 @@ pub fn build_mirror_elements(
                 continue;
             }
 
-            let snapshots = collect_layer_surfaces(renderer, layer);
+            let snapshots = collect_surface_tree(renderer, &layer.surface, layer.render_offset);
             if snapshots.is_empty() {
                 continue;
             }

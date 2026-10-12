@@ -483,6 +483,16 @@ impl EmskinState {
             .cloned()
     }
 
+    /// The Emacs window and where its buffer origin lands in the active
+    /// space — `element_location` minus the xdg window-geometry offset,
+    /// the same render location `Space::element_under` reports.
+    pub fn emacs_render_origin(&self) -> Option<(Window, Point<i32, Logical>)> {
+        let window = self.emacs_window()?;
+        let location =
+            self.workspace.active_space.element_location(&window)? - window.geometry().loc;
+        Some((window, location))
+    }
+
     /// The Emacs focus target.
     pub fn emacs_focus_target(&self) -> Option<crate::KeyboardFocusTarget> {
         self.emacs_window().map(crate::KeyboardFocusTarget::from)
@@ -702,6 +712,14 @@ impl EmskinState {
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        // 0. Emacs child frames (corfu, posframe) are re-drawn above
+        //    embedded apps, so they win the hit-test too.
+        if self.emacs.is_in_child_frame(pos) {
+            if let Some(hit) = self.emacs_surface_under(pos) {
+                return Some(hit);
+            }
+        }
+
         // 1. Check mirror regions first — they overlay Emacs visually.
         //    Use app.geometry (always available) instead of space.element_geometry
         //    because the source window may be unmapped (visible=false).
@@ -754,6 +772,16 @@ impl EmskinState {
                     .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
                     .map(|(s, p)| (s, (p + location).to_f64()))
             })
+    }
+
+    fn emacs_surface_under(
+        &self,
+        pos: Point<f64, Logical>,
+    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        let (window, location) = self.emacs_render_origin()?;
+        window
+            .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
+            .map(|(s, p)| (s, (p + location).to_f64()))
     }
 
     fn layer_surface_under(
