@@ -39,8 +39,10 @@ tempfile = "3"
 [package.metadata.release]
 # cargo-release runs hooks with the package root as CWD. Scope the
 # git-cliff hook to this crate so it fires exactly once per release,
-# and write CHANGELOG.md to the workspace root via `../../`.
-pre-release-hook = ["git-cliff", "-o", "../../CHANGELOG.md", "--tag", "v{{version}}"]
+# and write CHANGELOG.md to the workspace root via `../../`. `-w ../..`
+# is required: git-cliff >= 2.x run from a subdirectory only includes
+# commits touching that directory, which drops pre-workspace history.
+pre-release-hook = ["git-cliff", "-w", "../..", "-o", "../../CHANGELOG.md", "--tag", "v{{version}}"]
 # Join the "workspace" shared-version group so cargo-release treats
 # this crate's version as in lockstep with `[workspace.package].version`
 # for the commit message + tagging, even though we can't use
