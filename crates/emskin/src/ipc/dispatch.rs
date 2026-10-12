@@ -77,6 +77,9 @@ pub fn handle_ipc_message(state: &mut EmskinState, msg: IncomingMessage) {
         IncomingMessage::SetCursorRect { rect, color } => {
             ipc_set_cursor_rect(state, rect, color);
         }
+        IncomingMessage::SetChildFrames { rects } => {
+            ipc_set_child_frames(state, rects);
+        }
         IncomingMessage::TakeScreenshot { path } => {
             tracing::debug!("IPC take_screenshot path={path}");
             state
@@ -133,6 +136,17 @@ fn ipc_set_cursor_rect(state: &mut EmskinState, rect: crate::ipc::IpcRect, color
         return;
     }
     jc.update(Some(canvas_rect), now);
+}
+
+fn ipc_set_child_frames(state: &mut EmskinState, rects: Vec<crate::ipc::IpcRect>) {
+    tracing::debug!("IPC set_child_frames {rects:?}");
+    let rects = rects
+        .into_iter()
+        .filter(|r| r.w > 0 && r.h > 0)
+        .map(|r| state.emacs_rect_to_canvas(r))
+        .collect();
+    state.emacs.set_child_frame_rects(rects);
+    state.needs_redraw = true;
 }
 
 fn ipc_set_geometry(state: &mut EmskinState, window_id: u64, rect: crate::ipc::IpcRect) {

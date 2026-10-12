@@ -16,6 +16,7 @@
 //! "last Emacs died → shutdown" path.
 
 use smithay::reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource};
+use smithay::utils::{Logical, Point, Rectangle};
 
 pub struct EmacsState {
     surface: Option<WlSurface>,
@@ -36,6 +37,11 @@ pub struct EmacsState {
     /// Deferred `set_maximized` request — mirror of
     /// `pending_fullscreen` for the maximize toplevel state.
     pending_maximize: Option<bool>,
+    /// Canvas-space rects of the active frame's visible child frames
+    /// (corfu, posframe, …), reported by Emacs over IPC. pgtk paints
+    /// child frames into the parent's own surface, so these regions are
+    /// re-drawn above embedded apps and take pointer input for Emacs.
+    child_frame_rects: Vec<Rectangle<i32, Logical>>,
 }
 
 impl EmacsState {
@@ -53,7 +59,24 @@ impl EmacsState {
             initial_size_settled: false,
             pending_fullscreen: None,
             pending_maximize: None,
+            child_frame_rects: Vec::new(),
         }
+    }
+
+    // -- Child frames ------------------------------------------------
+
+    pub fn set_child_frame_rects(&mut self, rects: Vec<Rectangle<i32, Logical>>) {
+        self.child_frame_rects = rects;
+    }
+
+    pub fn child_frame_rects(&self) -> &[Rectangle<i32, Logical>] {
+        &self.child_frame_rects
+    }
+
+    pub fn is_in_child_frame(&self, pos: Point<f64, Logical>) -> bool {
+        self.child_frame_rects
+            .iter()
+            .any(|r| r.to_f64().contains(pos))
     }
 
     // -- Main surface ------------------------------------------------

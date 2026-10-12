@@ -211,6 +211,11 @@ fn render_frame(
             }
         }
 
+        // Emacs child frames (corfu, posframe) lifted above embedded apps.
+        extras.extend(crate::child_frame_render::build_child_frame_elements(
+            state, renderer, scale,
+        ));
+
         // Layer surfaces + mirrors stacked below the chain output but above
         // the space's client windows.
         extras.extend(build_layer_surface_elements(renderer, output, scale));

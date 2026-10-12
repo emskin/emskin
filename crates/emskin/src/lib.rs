@@ -1,4 +1,5 @@
 pub mod capture;
+pub mod child_frame_render;
 pub mod clipboard_bridge;
 pub mod grabs;
 pub mod handlers;
@@ -8,6 +9,7 @@ pub mod mirror_render;
 pub mod protocols;
 pub mod recording;
 pub mod state;
+pub mod surface_snapshot;
 pub mod tick;
 pub mod winit;
 pub mod xwayland_satellite;
