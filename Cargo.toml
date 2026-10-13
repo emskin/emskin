@@ -31,3 +31,6 @@ tracing = "0.1"
 
 [profile.release]
 lto = true
+
+[patch."https://github.com/emskin/smithay.git"]
+smithay = { path = "smithay-local" }

@@ -8,8 +8,11 @@
 use smithay::input::pointer::PointerHandle;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point};
-use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraintsHandler};
+use smithay::wayland::pointer_constraints::{
+    with_pointer_constraint, PointerConstraint, PointerConstraintsHandler,
+};
 use smithay::{delegate_pointer_constraints, delegate_relative_pointer};
+use winit_crate::window::CursorGrabMode;
 
 use crate::EmskinState;
 
@@ -19,6 +22,12 @@ impl PointerConstraintsHandler for EmskinState {
             with_pointer_constraint(surface, pointer, |constraint| {
                 if let Some(constraint) = constraint {
                     constraint.activate();
+                    if matches!(&*constraint, PointerConstraint::Locked(_)) {
+                        if let Some(backend) = self.backend.as_ref() {
+                            let _ = backend.window().set_cursor_grab(CursorGrabMode::Locked);
+                            self.cursor.host_cursor_locked = true;
+                        }
+                    }
                 }
             });
         }
